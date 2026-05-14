@@ -341,8 +341,17 @@
         if (event.key === 'Shift') shiftPressed = true;
 
         if (commandPressed && shiftPressed) {
-            listening = true;
-            openOverlay();
+            if (overlay.style.display !== 'none') {
+                listening = false;
+                closeOverlay();
+                clearTimeout(autoTranslateTimer);
+                if (currentHighlightedElement) {
+                    currentHighlightedElement.classList.remove('highlighted-element');
+                    currentHighlightedElement = null;
+                }
+            } else {
+                listening = true;
+            }
         }
     });
 
@@ -361,14 +370,20 @@
         if (!userEditing) {
             const rawText = element.textContent || element.innerText || '';
             const trimmed = rawText.trim();
-            textContent.innerHTML = renderWithCVE(trimmed);
-            collapseTranslation();
 
-            if (autoTranslate && trimmed) {
-                clearTimeout(autoTranslateTimer);
-                autoTranslateTimer = setTimeout(() => {
-                    translateText(trimmed, { showLoading: false });
-                }, 800);
+            if (trimmed) {
+                textContent.innerHTML = renderWithCVE(trimmed);
+                collapseTranslation();
+                openOverlay();
+
+                if (autoTranslate) {
+                    clearTimeout(autoTranslateTimer);
+                    autoTranslateTimer = setTimeout(() => {
+                        translateText(trimmed, { showLoading: false });
+                    }, 800);
+                }
+            } else {
+                closeOverlay();
             }
         }
 
