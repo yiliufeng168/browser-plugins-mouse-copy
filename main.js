@@ -221,6 +221,12 @@
     let userEditing = false;
     let autoTranslate = false;
     let autoTranslateTimer = null;
+
+    // Load persisted auto-translate setting
+    (async () => {
+        autoTranslate = !!(await GM_getValue('auto_translate', false));
+        autoBtn.classList.toggle('active', autoTranslate);
+    })();
     let commandPressed = false;
     let shiftPressed = false;
 
@@ -334,6 +340,7 @@
         event.stopPropagation();
         autoTranslate = !autoTranslate;
         autoBtn.classList.toggle('active', autoTranslate);
+        GM_setValue('auto_translate', autoTranslate);
     });
 
     window.addEventListener('keydown', (event) => {
@@ -379,7 +386,7 @@
                 if (autoTranslate) {
                     clearTimeout(autoTranslateTimer);
                     autoTranslateTimer = setTimeout(() => {
-                        translateText(trimmed, { showLoading: false });
+                        translateText(trimmed);
                     }, 800);
                 }
             } else {
