@@ -277,6 +277,24 @@
     function callDeepSeekStream(text, apiKey, onChunk) {
         return new Promise((resolve, reject) => {
             let processed = 0;
+            let lineBuffer = '';
+
+            function parseSSEChunk(raw) {
+                lineBuffer += raw;
+                const lines = lineBuffer.split('\n');
+                lineBuffer = lines.pop(); // keep incomplete trailing line
+                for (const line of lines) {
+                    if (!line.startsWith('data: ')) continue;
+                    const payload = line.slice(6).trim();
+                    if (payload === '[DONE]') continue;
+                    try {
+                        const chunk = JSON.parse(payload);
+                        const content = chunk.choices?.[0]?.delta?.content;
+                        if (content) onChunk(content);
+                    } catch(e) {}
+                }
+            }
+
             currentStreamRequest = GM_xmlhttpRequest({
                 method: 'POST',
                 url: 'https://api.deepseek.com/chat/completions',
@@ -295,18 +313,15 @@
                 onprogress: (res) => {
                     const newData = res.responseText.slice(processed);
                     processed = res.responseText.length;
-                    for (const line of newData.split('\n')) {
-                        if (!line.startsWith('data: ')) continue;
-                        const payload = line.slice(6).trim();
-                        if (payload === '[DONE]') return;
-                        try {
-                            const chunk = JSON.parse(payload);
-                            const content = chunk.choices?.[0]?.delta?.content;
-                            if (content) onChunk(content);
-                        } catch(e) {}
-                    }
+                    if (newData) parseSSEChunk(newData);
                 },
-                onload: () => resolve(),
+                onload: (res) => {
+                    // onprogress may not fire in all Tampermonkey environments;
+                    // parse whatever responseText wasn't processed yet as fallback
+                    const remaining = res.responseText.slice(processed);
+                    if (remaining) parseSSEChunk(remaining);
+                    resolve();
+                },
                 onerror: () => reject(new Error('网络请求失败'))
             });
         });
