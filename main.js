@@ -221,6 +221,7 @@
     let userEditing = false;
     let autoTranslate = false;
     let autoTranslateTimer = null;
+    let currentStreamRequest = null;
 
     // Load persisted auto-translate setting
     (async () => {
@@ -273,9 +274,10 @@
         return key || '';
     }
 
-    function callDeepSeek(text, apiKey) {
+    function callDeepSeekStream(text, apiKey, onChunk) {
         return new Promise((resolve, reject) => {
-            GM_xmlhttpRequest({
+            let processed = 0;
+            currentStreamRequest = GM_xmlhttpRequest({
                 method: 'POST',
                 url: 'https://api.deepseek.com/chat/completions',
                 headers: {
@@ -284,19 +286,27 @@
                 },
                 data: JSON.stringify({
                     model: 'deepseek-chat',
+                    stream: true,
                     messages: [
                         { role: 'system', content: '你是一个翻译助手，将用户提供的文本翻译成中文，只返回翻译结果，不要解释。' },
                         { role: 'user', content: text }
                     ]
                 }),
-                onload: (res) => {
-                    try {
-                        const data = JSON.parse(res.responseText);
-                        resolve(data.choices[0].message.content);
-                    } catch(e) {
-                        reject(new Error('响应解析失败'));
+                onprogress: (res) => {
+                    const newData = res.responseText.slice(processed);
+                    processed = res.responseText.length;
+                    for (const line of newData.split('\n')) {
+                        if (!line.startsWith('data: ')) continue;
+                        const payload = line.slice(6).trim();
+                        if (payload === '[DONE]') return;
+                        try {
+                            const chunk = JSON.parse(payload);
+                            const content = chunk.choices?.[0]?.delta?.content;
+                            if (content) onChunk(content);
+                        } catch(e) {}
                     }
                 },
+                onload: () => resolve(),
                 onerror: () => reject(new Error('网络请求失败'))
             });
         });
@@ -304,6 +314,11 @@
 
     async function translateText(text, { showLoading = true } = {}) {
         if (!text) return;
+
+        if (currentStreamRequest) {
+            currentStreamRequest.abort();
+            currentStreamRequest = null;
+        }
 
         if (translationCache.has(text)) {
             showTranslation(translationCache.get(text));
@@ -318,13 +333,22 @@
             translateBtn.disabled = true;
         }
 
+        translationPanel.textContent = '';
+        translationPanel.style.display = 'block';
+        overlay.style.display = 'flex';
+
+        let fullText = '';
+
         try {
-            const result = await callDeepSeek(text, apiKey);
-            translationCache.set(text, result);
-            showTranslation(result);
+            await callDeepSeekStream(text, apiKey, (chunk) => {
+                fullText += chunk;
+                translationPanel.textContent = fullText;
+            });
+            if (fullText) translationCache.set(text, fullText);
         } catch(e) {
-            showTranslation('翻译失败：' + e.message);
+            translationPanel.textContent = '翻译失败：' + e.message;
         } finally {
+            currentStreamRequest = null;
             if (showLoading) {
                 translateBtn.innerHTML = '&#127760; 翻译';
                 translateBtn.disabled = false;
