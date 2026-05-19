@@ -414,7 +414,8 @@
     let lastEncodedText = '';
     let commandPressed = false;
     let shiftPressed = false;
-    let justClosed = false;
+    let mouseMoving = false;
+    let mouseMoveTimer = null;
 
     // Load persisted auto-translate setting
     (async () => {
@@ -792,11 +793,10 @@
             return;
         }
 
-        // Cmd+Shift chord completed (second of the two keys pressed) while overlay is visible → close
+        // Cmd+Shift chord completed while overlay is visible and mouse is idle → close
         const chordCompleted = (event.key === 'Shift' && prevCmd) || (event.key === 'Meta' && prevShift);
-        if (chordCompleted && overlay.style.display !== 'none') {
+        if (chordCompleted && overlay.style.display !== 'none' && !mouseMoving) {
             closeOverlay();
-            justClosed = true;
             clearTimeout(autoTranslateTimer);
             if (currentHighlightedElement) {
                 currentHighlightedElement.classList.remove('highlighted-element');
@@ -808,13 +808,15 @@
     window.addEventListener('keyup', (event) => {
         if (event.key === 'Meta') commandPressed = false;
         if (event.key === 'Shift') shiftPressed = false;
-        if (!commandPressed && !shiftPressed) justClosed = false;
     });
 
-    // Hover capture: only while Cmd+Shift held and overlay is not visible
+    // Hover capture: while Cmd+Shift held, always track and update regardless of overlay state
     document.addEventListener('mousemove', (event) => {
-        if (!commandPressed || !shiftPressed || justClosed) return;
-        if (overlay.style.display !== 'none') return;
+        mouseMoving = true;
+        clearTimeout(mouseMoveTimer);
+        mouseMoveTimer = setTimeout(() => { mouseMoving = false; }, 150);
+
+        if (!commandPressed || !shiftPressed) return;
 
         const element = document.elementFromPoint(event.clientX, event.clientY);
         if (!element || overlay.contains(element)) return;
