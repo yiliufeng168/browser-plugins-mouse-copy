@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mouse Move Text Extractor with Highlight, Selectable Text, Clipboard Copy, and Centered Notification (Command + Shift)
 // @namespace    http://tampermonkey.net/
-// @version      0.9
+// @version      0.10
 // @description  Extract text content from elements on mouse hover when Command + Shift key is pressed, with highlight, selectable text, clipboard copy, DeepSeek translation, encode/decode panel, and centered popup notification
 // @author       You
 // @match        *://*/*
@@ -18,7 +18,7 @@
     GM_addStyle(`
         #mouse-text-overlay {
             position: fixed;
-            background-color: rgba(0, 0, 0, 0.7);
+            background-color: rgba(0, 0, 0, 0.82);
             color: white;
             padding: 24px 10px 8px 10px;
             font-size: 16px;
@@ -26,7 +26,7 @@
             z-index: 9999;
             pointer-events: auto;
             user-select: text;
-            max-width: 820px;
+            max-width: 1100px;
         }
         #mouse-text-body {
             display: flex;
@@ -45,6 +45,10 @@
             cursor: text;
             max-height: 300px;
             overflow-y: auto;
+            transition: min-height 0.15s ease;
+        }
+        #mouse-text-content.free-input {
+            min-height: 130px;
         }
         #mouse-text-content:focus {
             outline: 1px solid rgba(255,255,255,0.4);
@@ -158,58 +162,67 @@
             user-select: none;
         }
         #mouse-text-close-btn:hover { color: white; }
-        #mouse-text-codec {
+        /* --- Codec panels --- */
+        #mouse-text-codec-encode,
+        #mouse-text-codec-hash {
             display: none;
-            flex: 0 0 360px;
+            flex: 0 0 300px;
             min-width: 0;
-            max-height: 340px;
+            max-height: 360px;
             overflow-y: auto;
-            border-left: 1px solid rgba(255,255,255,0.2);
+            border-left: 1px solid rgba(255,255,255,0.15);
             padding-left: 10px;
-            font-size: 12px;
-            word-break: break-all;
-            color: #e0e0e0;
             user-select: text;
         }
-        .codec-section-title {
-            font-size: 11px;
-            font-weight: bold;
-            color: rgba(255,255,255,0.45);
+        #mouse-text-codec-hash {
+            flex: 0 0 260px;
+        }
+        .codec-panel-header {
+            font-size: 10px;
+            font-weight: 700;
+            color: rgba(255,255,255,0.35);
             text-transform: uppercase;
-            letter-spacing: 0.06em;
-            margin: 8px 0 4px 0;
-            padding-bottom: 2px;
+            letter-spacing: 0.1em;
+            margin-bottom: 7px;
+            padding-bottom: 4px;
             border-bottom: 1px solid rgba(255,255,255,0.1);
         }
-        .codec-section-title:first-child { margin-top: 0; }
+        .codec-divider {
+            height: 1px;
+            background: rgba(255,255,255,0.07);
+            margin: 5px 0;
+        }
         .codec-row {
             display: flex;
             align-items: flex-start;
             gap: 5px;
-            margin-bottom: 5px;
+            margin-bottom: 4px;
         }
         .codec-label {
             flex: 0 0 auto;
+            min-width: 80px;
             font-size: 11px;
-            color: rgba(255,255,255,0.5);
+            color: #8b9eb0;
             white-space: nowrap;
             padding-top: 1px;
-            min-width: 90px;
         }
         .codec-value {
             flex: 1 1 0;
             word-break: break-all;
-            color: #d0f0ff;
+            color: #e8f4ff;
             font-family: monospace;
-            font-size: 11px;
-            line-height: 1.4;
+            font-size: 11.5px;
+            line-height: 1.45;
+        }
+        #mouse-text-codec-hash .codec-value {
+            color: #a8f0c6;
         }
         .codec-value.codec-fail {
-            color: rgba(255,255,255,0.28);
+            color: rgba(255,255,255,0.22);
             font-style: italic;
         }
         .codec-value.codec-loading {
-            color: rgba(255,255,255,0.35);
+            color: rgba(255,255,255,0.38);
             font-style: italic;
         }
         .codec-copy-btn {
@@ -218,7 +231,7 @@
             border: none;
             border-radius: 3px;
             background: rgba(255,255,255,0.1);
-            color: rgba(255,255,255,0.6);
+            color: rgba(255,255,255,0.55);
             font-size: 10px;
             cursor: pointer;
             user-select: none;
@@ -226,10 +239,10 @@
             white-space: nowrap;
             align-self: flex-start;
         }
-        .codec-copy-btn:hover { background: rgba(255,255,255,0.2); }
+        .codec-copy-btn:hover { background: rgba(255,255,255,0.22); color: white; }
         .codec-copy-btn.copied {
-            background: rgba(46,204,113,0.35);
-            color: #2ecc71;
+            background: rgba(46,204,113,0.3);
+            color: #4ade80;
         }
         #mouse-text-codec-btn {
             display: inline-flex;
@@ -242,12 +255,12 @@
             cursor: pointer;
             user-select: none;
             transition: opacity 0.15s, transform 0.1s;
-            background: linear-gradient(135deg, #8e44ad, #3498db);
+            background: linear-gradient(135deg, #6d28d9, #2563eb);
             color: white;
         }
         #mouse-text-codec-btn:hover { opacity: 0.85; }
         #mouse-text-codec-btn:active { transform: scale(0.95); }
-        #mouse-text-codec-btn.active { outline: 2px solid rgba(255,255,255,0.5); }
+        #mouse-text-codec-btn.active { outline: 2px solid rgba(255,255,255,0.45); }
     `);
 
     // --- DOM structure ---
@@ -296,19 +309,30 @@
     translationPanel.id = 'mouse-text-translation';
     body.appendChild(translationPanel);
 
-    // --- Codec panel DOM ---
-    const codecPanel = document.createElement('div');
-    codecPanel.id = 'mouse-text-codec';
-    body.appendChild(codecPanel);
+    // --- Encode/decode panel ---
+    const codecEncodePanel = document.createElement('div');
+    codecEncodePanel.id = 'mouse-text-codec-encode';
+    body.appendChild(codecEncodePanel);
 
-    function makeCodecSection(title) {
-        const d = document.createElement('div');
-        d.className = 'codec-section-title';
-        d.textContent = title;
-        codecPanel.appendChild(d);
+    // --- Hash panel ---
+    const codecHashPanel = document.createElement('div');
+    codecHashPanel.id = 'mouse-text-codec-hash';
+    body.appendChild(codecHashPanel);
+
+    function makePanel(panel, title) {
+        const h = document.createElement('div');
+        h.className = 'codec-panel-header';
+        h.textContent = title;
+        panel.appendChild(h);
     }
 
-    function makeCodecRow(label) {
+    function makeDivider(panel) {
+        const d = document.createElement('div');
+        d.className = 'codec-divider';
+        panel.appendChild(d);
+    }
+
+    function makeCodecRow(panel, label) {
         const row = document.createElement('div');
         row.className = 'codec-row';
         const lbl = document.createElement('span');
@@ -322,43 +346,44 @@
         row.appendChild(lbl);
         row.appendChild(val);
         row.appendChild(btn);
-        codecPanel.appendChild(row);
+        panel.appendChild(row);
         return { valueEl: val, copyBtn: btn };
     }
 
-    makeCodecSection('URL');
+    makePanel(codecEncodePanel, '编解码');
     const codecRows = {
-        urlEncode:    makeCodecRow('URL 编码'),
-        urlEncodeAll: makeCodecRow('URL 全编码'),
-        urlDecode:    makeCodecRow('URL 解码'),
+        urlEncode:    makeCodecRow(codecEncodePanel, 'URL 编码'),
+        urlEncodeAll: makeCodecRow(codecEncodePanel, 'URL 全编码'),
+        urlDecode:    makeCodecRow(codecEncodePanel, 'URL 解码'),
     };
-    makeCodecSection('Base64');
+    makeDivider(codecEncodePanel);
     Object.assign(codecRows, {
-        b64Encode: makeCodecRow('B64 编码'),
-        b64Decode: makeCodecRow('B64 解码'),
+        b64Encode: makeCodecRow(codecEncodePanel, 'B64 编码'),
+        b64Decode: makeCodecRow(codecEncodePanel, 'B64 解码'),
     });
-    makeCodecSection('十六进制');
+    makeDivider(codecEncodePanel);
     Object.assign(codecRows, {
-        hexEncode: makeCodecRow('Hex 编码'),
-        hexDecode: makeCodecRow('Hex 解码'),
+        hexEncode: makeCodecRow(codecEncodePanel, 'Hex 编码'),
+        hexDecode: makeCodecRow(codecEncodePanel, 'Hex 解码'),
     });
-    makeCodecSection('Unicode');
+    makeDivider(codecEncodePanel);
     Object.assign(codecRows, {
-        unicodeEscape:   makeCodecRow('\\uXXXX 转义'),
-        unicodeUnescape: makeCodecRow('\\uXXXX 还原'),
+        unicodeEscape:   makeCodecRow(codecEncodePanel, '\\uXXXX 转义'),
+        unicodeUnescape: makeCodecRow(codecEncodePanel, '\\uXXXX 还原'),
     });
-    makeCodecSection('ASCII 转义');
+    makeDivider(codecEncodePanel);
     Object.assign(codecRows, {
-        hexEscapeAscii: makeCodecRow('\\xXX 转义'),
-        octEscapeAscii: makeCodecRow('\\0XX 转义'),
+        hexEscapeAscii: makeCodecRow(codecEncodePanel, '\\xXX 转义'),
+        octEscapeAscii: makeCodecRow(codecEncodePanel, '\\0XX 转义'),
     });
-    makeCodecSection('哈希');
+
+    makePanel(codecHashPanel, '哈希');
     Object.assign(codecRows, {
-        md5:    makeCodecRow('MD5'),
-        sha1:   makeCodecRow('SHA-1'),
-        sha256: makeCodecRow('SHA-256'),
-        sha384: makeCodecRow('SHA-384'),
-        sha512: makeCodecRow('SHA-512'),
+        md5:    makeCodecRow(codecHashPanel, 'MD5'),
+        sha1:   makeCodecRow(codecHashPanel, 'SHA-1'),
+        sha256: makeCodecRow(codecHashPanel, 'SHA-256'),
+        sha384: makeCodecRow(codecHashPanel, 'SHA-384'),
+        sha512: makeCodecRow(codecHashPanel, 'SHA-512'),
     });
 
     const closeBtn = document.createElement('button');
@@ -377,6 +402,7 @@
     const CVE_REGEX = /CVE-\d{4}-\d{4,7}/gi;
     const translationCache = new Map();
     let listening = false;
+    let manuallyOpened = false;
     let currentHighlightedElement = null;
     let userEditing = false;
     let autoTranslate = false;
@@ -410,8 +436,11 @@
     function closeOverlay() {
         overlay.style.display = 'none';
         translationPanel.style.display = 'none';
-        codecPanel.style.display = 'none';
+        codecEncodePanel.style.display = 'none';
+        codecHashPanel.style.display = 'none';
         codecBtn.classList.remove('active');
+        textContent.classList.remove('free-input');
+        manuallyOpened = false;
     }
 
     function showTranslation(text) {
@@ -430,7 +459,8 @@
     }
 
     function collapseCodecPanel() {
-        codecPanel.style.display = 'none';
+        codecEncodePanel.style.display = 'none';
+        codecHashPanel.style.display = 'none';
         if (overlay.style.display !== 'none') {
             overlay.style.display = 'block';
         }
@@ -562,7 +592,8 @@
 
     async function showCodecPanel(text) {
         collapseTranslation();
-        codecPanel.style.display = 'block';
+        codecEncodePanel.style.display = 'block';
+        codecHashPanel.style.display = 'block';
         overlay.style.display = 'flex';
 
         setCodecRow(codecRows.urlEncode,       codecUrlEncode(text));
@@ -606,7 +637,7 @@
             function parseSSEChunk(raw) {
                 lineBuffer += raw;
                 const lines = lineBuffer.split('\n');
-                lineBuffer = lines.pop(); // keep incomplete trailing line
+                lineBuffer = lines.pop();
                 for (const line of lines) {
                     if (!line.startsWith('data: ')) continue;
                     const payload = line.slice(6).trim();
@@ -640,8 +671,6 @@
                     if (newData) parseSSEChunk(newData);
                 },
                 onload: (res) => {
-                    // onprogress may not fire in all Tampermonkey environments;
-                    // parse whatever responseText wasn't processed yet as fallback
                     const remaining = res.responseText.slice(processed);
                     if (remaining) parseSSEChunk(remaining);
                     resolve();
@@ -710,7 +739,7 @@
 
     codecBtn.addEventListener('click', (event) => {
         event.stopPropagation();
-        if (codecPanel.style.display !== 'none') {
+        if (codecEncodePanel.style.display !== 'none') {
             collapseCodecPanel();
             codecBtn.classList.remove('active');
         } else {
@@ -719,7 +748,7 @@
         }
     });
 
-    codecPanel.addEventListener('click', (event) => {
+    codecEncodePanel.addEventListener('click', (event) => {
         event.stopPropagation();
         const btn = event.target.closest('.codec-copy-btn');
         if (!btn || !btn.dataset.value) return;
@@ -727,10 +756,19 @@
             const orig = btn.textContent;
             btn.textContent = '✓';
             btn.classList.add('copied');
-            setTimeout(() => {
-                btn.textContent = orig;
-                btn.classList.remove('copied');
-            }, 1500);
+            setTimeout(() => { btn.textContent = orig; btn.classList.remove('copied'); }, 1500);
+        }).catch(() => {});
+    });
+
+    codecHashPanel.addEventListener('click', (event) => {
+        event.stopPropagation();
+        const btn = event.target.closest('.codec-copy-btn');
+        if (!btn || !btn.dataset.value) return;
+        navigator.clipboard.writeText(btn.dataset.value).then(() => {
+            const orig = btn.textContent;
+            btn.textContent = '✓';
+            btn.classList.add('copied');
+            setTimeout(() => { btn.textContent = orig; btn.classList.remove('copied'); }, 1500);
         }).catch(() => {});
     });
 
@@ -749,6 +787,12 @@
                 }
             } else {
                 listening = true;
+                manuallyOpened = true;
+                // Show overlay immediately; free-input mode when no text
+                openOverlay();
+                if (!textContent.innerText.trim()) {
+                    textContent.classList.add('free-input');
+                }
             }
         }
     });
@@ -763,7 +807,7 @@
     document.addEventListener('mousemove', (event) => {
         if (!listening) return;
         const element = document.elementFromPoint(event.clientX, event.clientY);
-        if (!element) return;
+        if (!element || overlay.contains(element)) return;
 
         if (!userEditing) {
             const rawText = element.textContent || element.innerText || '';
@@ -771,6 +815,7 @@
 
             if (trimmed) {
                 textContent.innerHTML = renderWithCVE(trimmed);
+                textContent.classList.remove('free-input');
                 collapseTranslation();
                 collapseCodecPanel();
                 codecBtn.classList.remove('active');
@@ -782,7 +827,7 @@
                         translateText(trimmed);
                     }, 800);
                 }
-            } else {
+            } else if (!manuallyOpened) {
                 closeOverlay();
             }
         }
