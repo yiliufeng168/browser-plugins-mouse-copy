@@ -44,6 +44,7 @@
             flex: 1 1 auto;
             user-select: text;
             word-break: break-word;
+            white-space: pre-wrap;
             outline: none;
             min-height: 1em;
             max-height: 420px;
@@ -435,6 +436,55 @@
         );
     }
 
+    function extractStructuredText(element) {
+        const BLOCK = new Set([
+            'P','DIV','SECTION','ARTICLE','HEADER','FOOTER','MAIN','NAV','ASIDE',
+            'H1','H2','H3','H4','H5','H6','BLOCKQUOTE','PRE','FIGURE','FIGCAPTION',
+            'ADDRESS','DETAILS','SUMMARY','TABLE','THEAD','TBODY','TFOOT','TR','DD','DT'
+        ]);
+
+        function walkChildren(node) {
+            let s = '';
+            for (const child of node.childNodes) s += walk(child);
+            return s;
+        }
+
+        function walk(node) {
+            if (node.nodeType === 3) { // TEXT_NODE
+                return node.textContent.replace(/[\r\n\t ]+/g, ' ');
+            }
+            if (node.nodeType !== 1) return ''; // not ELEMENT_NODE
+            const tag = node.tagName;
+            if (tag === 'SCRIPT' || tag === 'STYLE' || tag === 'NOSCRIPT') return '';
+            if (tag === 'BR') return '\n';
+            if (tag === 'HR') return '\n───\n';
+
+            if (tag === 'UL' || tag === 'OL') {
+                let result = '', idx = 0;
+                for (const child of node.childNodes) {
+                    if (child.nodeType === 1 && child.tagName === 'LI') {
+                        idx++;
+                        const prefix = tag === 'OL' ? `${idx}. ` : '• ';
+                        const content = walkChildren(child).trim();
+                        if (content) result += prefix + content + '\n';
+                    } else {
+                        result += walk(child);
+                    }
+                }
+                return '\n' + result;
+            }
+
+            if (tag === 'TD' || tag === 'TH') return walkChildren(node).trim() + '\t';
+            if (tag === 'TR') return walkChildren(node).replace(/\t$/, '') + '\n';
+
+            const inner = walkChildren(node);
+            if (BLOCK.has(tag)) return '\n' + inner.trim() + '\n';
+            return inner;
+        }
+
+        return walk(element).replace(/\n{3,}/g, '\n\n').trim();
+    }
+
     function openOverlay() {
         overlay.style.display = 'block';
     }
@@ -822,8 +872,7 @@
         if (!element || overlay.contains(element)) return;
 
         if (!userEditing) {
-            const rawText = element.textContent || element.innerText || '';
-            const trimmed = rawText.trim();
+            const trimmed = extractStructuredText(element);
 
             if (trimmed) {
                 textContent.innerHTML = renderWithCVE(trimmed);
