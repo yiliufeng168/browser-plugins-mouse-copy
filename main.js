@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mouse Move Text Extractor with Highlight, Selectable Text, Clipboard Copy, and Centered Notification (Command + Shift)
 // @namespace    http://tampermonkey.net/
-// @version      0.10
+// @version      0.11
 // @description  Extract text content from elements on mouse hover when Command + Shift key is pressed, with highlight, selectable text, clipboard copy, DeepSeek translation, encode/decode panel, and centered popup notification
 // @author       You
 // @match        *://*/*
@@ -26,24 +26,28 @@
             z-index: 9999;
             pointer-events: auto;
             user-select: text;
-            max-width: 1100px;
+            max-width: 2200px;
         }
         #mouse-text-body {
             display: flex;
             flex-direction: row;
             gap: 12px;
+            align-items: stretch;
         }
         #mouse-text-left {
             flex: 0 0 380px;
             min-width: 0;
+            display: flex;
+            flex-direction: column;
         }
         #mouse-text-content {
+            flex: 1 1 auto;
             user-select: text;
             word-break: break-word;
             outline: none;
             min-height: 1em;
+            max-height: 420px;
             cursor: text;
-            max-height: 300px;
             overflow-y: auto;
             transition: min-height 0.15s ease;
         }
@@ -58,7 +62,7 @@
             display: none;
             flex: 0 0 360px;
             min-width: 0;
-            max-height: 340px;
+            max-height: 420px;
             overflow-y: auto;
             border-left: 1px solid rgba(255,255,255,0.2);
             padding-left: 10px;
@@ -88,6 +92,7 @@
             margin-top: 8px;
             flex-wrap: wrap;
             align-items: center;
+            flex-shrink: 0;
         }
         #mouse-text-copy-btn,
         #mouse-text-translate-btn,
@@ -166,17 +171,15 @@
         #mouse-text-codec-encode,
         #mouse-text-codec-hash {
             display: none;
-            flex: 0 0 300px;
             min-width: 0;
-            max-height: 360px;
+            max-height: 420px;
             overflow-y: auto;
             border-left: 1px solid rgba(255,255,255,0.15);
             padding-left: 10px;
             user-select: text;
         }
-        #mouse-text-codec-hash {
-            flex: 0 0 260px;
-        }
+        #mouse-text-codec-encode { flex: 0 0 420px; }
+        #mouse-text-codec-hash   { flex: 0 0 360px; }
         .codec-panel-header {
             font-size: 10px;
             font-weight: 700;
@@ -195,13 +198,13 @@
         .codec-row {
             display: flex;
             align-items: flex-start;
-            gap: 5px;
-            margin-bottom: 4px;
+            gap: 6px;
+            margin-bottom: 5px;
         }
         .codec-label {
             flex: 0 0 auto;
-            min-width: 80px;
-            font-size: 11px;
+            min-width: 100px;
+            font-size: 12px;
             color: #8b9eb0;
             white-space: nowrap;
             padding-top: 1px;
@@ -211,8 +214,8 @@
             word-break: break-all;
             color: #e8f4ff;
             font-family: monospace;
-            font-size: 11.5px;
-            line-height: 1.45;
+            font-size: 13px;
+            line-height: 1.5;
         }
         #mouse-text-codec-hash .codec-value {
             color: #a8f0c6;
@@ -227,12 +230,12 @@
         }
         .codec-copy-btn {
             flex: 0 0 auto;
-            padding: 1px 5px;
+            padding: 1px 6px;
             border: none;
             border-radius: 3px;
             background: rgba(255,255,255,0.1);
             color: rgba(255,255,255,0.55);
-            font-size: 10px;
+            font-size: 11px;
             cursor: pointer;
             user-select: none;
             transition: background 0.12s;
@@ -408,6 +411,7 @@
     let autoTranslate = false;
     let autoTranslateTimer = null;
     let currentStreamRequest = null;
+    let lastEncodedText = '';
 
     // Load persisted auto-translate setting
     (async () => {
@@ -591,6 +595,7 @@
     }
 
     async function showCodecPanel(text) {
+        lastEncodedText = text;
         collapseTranslation();
         codecEncodePanel.style.display = 'block';
         codecHashPanel.style.display = 'block';
@@ -739,16 +744,23 @@
 
     codecBtn.addEventListener('click', (event) => {
         event.stopPropagation();
+        const currentText = textContent.innerText.trim();
         if (codecEncodePanel.style.display !== 'none') {
-            collapseCodecPanel();
-            codecBtn.classList.remove('active');
+            if (currentText === lastEncodedText) {
+                // Same text: toggle close
+                collapseCodecPanel();
+                codecBtn.classList.remove('active');
+            } else {
+                // Text changed: re-encode without closing
+                showCodecPanel(currentText);
+            }
         } else {
             codecBtn.classList.add('active');
-            showCodecPanel(textContent.innerText.trim());
+            showCodecPanel(currentText);
         }
     });
 
-    codecEncodePanel.addEventListener('click', (event) => {
+    function handleCodecCopy(event) {
         event.stopPropagation();
         const btn = event.target.closest('.codec-copy-btn');
         if (!btn || !btn.dataset.value) return;
@@ -758,19 +770,10 @@
             btn.classList.add('copied');
             setTimeout(() => { btn.textContent = orig; btn.classList.remove('copied'); }, 1500);
         }).catch(() => {});
-    });
+    }
 
-    codecHashPanel.addEventListener('click', (event) => {
-        event.stopPropagation();
-        const btn = event.target.closest('.codec-copy-btn');
-        if (!btn || !btn.dataset.value) return;
-        navigator.clipboard.writeText(btn.dataset.value).then(() => {
-            const orig = btn.textContent;
-            btn.textContent = '✓';
-            btn.classList.add('copied');
-            setTimeout(() => { btn.textContent = orig; btn.classList.remove('copied'); }, 1500);
-        }).catch(() => {});
-    });
+    codecEncodePanel.addEventListener('click', handleCodecCopy);
+    codecHashPanel.addEventListener('click', handleCodecCopy);
 
     window.addEventListener('keydown', (event) => {
         if (event.key === 'Meta') commandPressed = true;
@@ -788,7 +791,6 @@
             } else {
                 listening = true;
                 manuallyOpened = true;
-                // Show overlay immediately; free-input mode when no text
                 openOverlay();
                 if (!textContent.innerText.trim()) {
                     textContent.classList.add('free-input');
