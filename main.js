@@ -565,7 +565,7 @@
         }
         function rhex(n) {
             let s = '';
-            for (let j = 0; j < 4; j++) s += ('0' + ((n >>> (j * 8 + 4)) & 0xF).toString(16)) + ('0' + ((n >>> (j * 8)) & 0xF).toString(16));
+            for (let j = 0; j < 4; j++) s += ((n >>> (j * 8 + 4)) & 0xF).toString(16) + ((n >>> (j * 8)) & 0xF).toString(16);
             return s;
         }
         const bs = md5blks(unescape(encodeURIComponent(str)));
