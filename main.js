@@ -786,6 +786,18 @@
     textContent.addEventListener('focus', () => { userEditing = true; });
     textContent.addEventListener('blur', () => { userEditing = false; });
 
+    // On macOS, Cmd+Backspace means "delete to line start", not "delete selection".
+    // When text is already selected (e.g. via Cmd+A), intercept and delete the selection instead.
+    textContent.addEventListener('keydown', (event) => {
+        if (event.key === 'Backspace' && event.metaKey) {
+            const sel = window.getSelection();
+            if (sel && !sel.isCollapsed) {
+                event.preventDefault();
+                sel.deleteFromDocument();
+            }
+        }
+    });
+
     autoBtn.addEventListener('click', (event) => {
         event.stopPropagation();
         autoTranslate = !autoTranslate;
