@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         Mouse Move Text Extractor with Highlight, Selectable Text, Clipboard Copy, and Centered Notification (Command + Shift)
+// @name         Mouse Move Text Extractor with Highlight, Selectable Text, Clipboard Copy, and Centered Notification (Command + Shift + P)
 // @namespace    http://tampermonkey.net/
-// @version      0.11
-// @description  Extract text content from elements on mouse hover when Command + Shift key is pressed, with highlight, selectable text, clipboard copy, DeepSeek translation, encode/decode panel, and centered popup notification
+// @version      0.12
+// @description  Extract text content from elements on mouse hover when Command + Shift + P is pressed, with highlight, selectable text, clipboard copy, DeepSeek translation, encode/decode panel, and centered popup notification
 // @author       You
 // @match        *://*/*
 // @grant        GM_addStyle
@@ -52,7 +52,7 @@
             transition: min-height 0.15s ease;
         }
         #mouse-text-content.free-input {
-            min-height: 130px;
+            min-height: 200px;
         }
         #mouse-text-content:focus {
             outline: 1px solid rgba(255,255,255,0.4);
@@ -181,14 +181,14 @@
         #mouse-text-codec-encode { flex: 0 0 420px; }
         #mouse-text-codec-hash   { flex: 0 0 360px; }
         .codec-panel-header {
-            font-size: 10px;
+            font-size: 11px;
             font-weight: 700;
-            color: rgba(255,255,255,0.35);
+            color: rgba(255,255,255,0.65);
             text-transform: uppercase;
-            letter-spacing: 0.1em;
+            letter-spacing: 0.08em;
             margin-bottom: 7px;
             padding-bottom: 4px;
-            border-bottom: 1px solid rgba(255,255,255,0.1);
+            border-bottom: 1px solid rgba(255,255,255,0.15);
         }
         .codec-divider {
             height: 1px;
@@ -205,9 +205,9 @@
             flex: 0 0 auto;
             min-width: 100px;
             font-size: 12px;
-            color: #8b9eb0;
+            color: #b8d0e8;
             white-space: nowrap;
-            padding-top: 1px;
+            padding-top: 2px;
         }
         .codec-value {
             flex: 1 1 0;
@@ -216,16 +216,18 @@
             font-family: monospace;
             font-size: 13px;
             line-height: 1.5;
+            max-height: 4.5em;
+            overflow-y: auto;
         }
         #mouse-text-codec-hash .codec-value {
             color: #a8f0c6;
         }
         .codec-value.codec-fail {
-            color: rgba(255,255,255,0.22);
+            color: rgba(255,255,255,0.3);
             font-style: italic;
         }
         .codec-value.codec-loading {
-            color: rgba(255,255,255,0.38);
+            color: rgba(255,255,255,0.45);
             font-style: italic;
         }
         .codec-copy-btn {
@@ -234,7 +236,7 @@
             border: none;
             border-radius: 3px;
             background: rgba(255,255,255,0.1);
-            color: rgba(255,255,255,0.55);
+            color: rgba(255,255,255,0.6);
             font-size: 11px;
             cursor: pointer;
             user-select: none;
@@ -404,22 +406,19 @@
     // --- State ---
     const CVE_REGEX = /CVE-\d{4}-\d{4,7}/gi;
     const translationCache = new Map();
-    let listening = false;
-    let manuallyOpened = false;
     let currentHighlightedElement = null;
     let userEditing = false;
     let autoTranslate = false;
     let autoTranslateTimer = null;
     let currentStreamRequest = null;
     let lastEncodedText = '';
+    let manuallyOpened = false;
 
     // Load persisted auto-translate setting
     (async () => {
         autoTranslate = !!(await GM_getValue('auto_translate', false));
         autoBtn.classList.toggle('active', autoTranslate);
     })();
-    let commandPressed = false;
-    let shiftPressed = false;
 
     // --- Helpers ---
     function escapeHtml(str) {
@@ -747,11 +746,9 @@
         const currentText = textContent.innerText.trim();
         if (codecEncodePanel.style.display !== 'none') {
             if (currentText === lastEncodedText) {
-                // Same text: toggle close
                 collapseCodecPanel();
                 codecBtn.classList.remove('active');
             } else {
-                // Text changed: re-encode without closing
                 showCodecPanel(currentText);
             }
         } else {
@@ -775,39 +772,30 @@
     codecEncodePanel.addEventListener('click', handleCodecCopy);
     codecHashPanel.addEventListener('click', handleCodecCopy);
 
+    // Toggle overlay with Cmd+Shift+P
     window.addEventListener('keydown', (event) => {
-        if (event.key === 'Meta') commandPressed = true;
-        if (event.key === 'Shift') shiftPressed = true;
+        if (event.key.toLowerCase() !== 'p' || !event.metaKey || !event.shiftKey) return;
+        event.preventDefault();
 
-        if (commandPressed && shiftPressed) {
-            if (overlay.style.display !== 'none') {
-                listening = false;
-                closeOverlay();
-                clearTimeout(autoTranslateTimer);
-                if (currentHighlightedElement) {
-                    currentHighlightedElement.classList.remove('highlighted-element');
-                    currentHighlightedElement = null;
-                }
-            } else {
-                listening = true;
-                manuallyOpened = true;
-                openOverlay();
-                if (!textContent.innerText.trim()) {
-                    textContent.classList.add('free-input');
-                }
+        if (overlay.style.display !== 'none') {
+            closeOverlay();
+            clearTimeout(autoTranslateTimer);
+            if (currentHighlightedElement) {
+                currentHighlightedElement.classList.remove('highlighted-element');
+                currentHighlightedElement = null;
+            }
+        } else {
+            manuallyOpened = true;
+            openOverlay();
+            if (!textContent.innerText.trim()) {
+                textContent.classList.add('free-input');
             }
         }
     });
 
-    window.addEventListener('keyup', (event) => {
-        if (event.key === 'Meta') commandPressed = false;
-        if (event.key === 'Shift') shiftPressed = false;
-
-        if (!(commandPressed && shiftPressed)) listening = false;
-    });
-
     document.addEventListener('mousemove', (event) => {
-        if (!listening) return;
+        // Hover capture is active whenever the overlay is visible
+        if (overlay.style.display === 'none') return;
         const element = document.elementFromPoint(event.clientX, event.clientY);
         if (!element || overlay.contains(element)) return;
 
