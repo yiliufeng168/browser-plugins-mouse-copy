@@ -882,7 +882,7 @@
                 codecBtn.classList.remove('active');
                 openOverlay();
 
-                if (autoTranslate) {
+                if (autoTranslate && trimmed.length <= 500) {
                     clearTimeout(autoTranslateTimer);
                     autoTranslateTimer = setTimeout(() => {
                         translateText(trimmed);
