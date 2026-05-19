@@ -412,7 +412,9 @@
     let autoTranslateTimer = null;
     let currentStreamRequest = null;
     let lastEncodedText = '';
-    let manuallyOpened = false;
+    let commandPressed = false;
+    let shiftPressed = false;
+    let justClosed = false;
 
     // Load persisted auto-translate setting
     (async () => {
@@ -443,7 +445,6 @@
         codecHashPanel.style.display = 'none';
         codecBtn.classList.remove('active');
         textContent.classList.remove('free-input');
-        manuallyOpened = false;
     }
 
     function showTranslation(text) {
@@ -772,30 +773,49 @@
     codecEncodePanel.addEventListener('click', handleCodecCopy);
     codecHashPanel.addEventListener('click', handleCodecCopy);
 
-    // Toggle overlay with Cmd+Shift+P
+    // Cmd+Shift+P → show overlay; Cmd+Shift (chord) → close overlay when visible
     window.addEventListener('keydown', (event) => {
-        if (event.key.toLowerCase() !== 'p' || !event.metaKey || !event.shiftKey) return;
-        event.preventDefault();
+        const prevCmd = commandPressed;
+        const prevShift = shiftPressed;
+        if (event.key === 'Meta') commandPressed = true;
+        if (event.key === 'Shift') shiftPressed = true;
 
-        if (overlay.style.display !== 'none') {
+        // Cmd+Shift+P: show overlay if hidden
+        if (event.key.toLowerCase() === 'p' && commandPressed && shiftPressed) {
+            event.preventDefault();
+            if (overlay.style.display === 'none') {
+                openOverlay();
+                if (!textContent.innerText.trim()) {
+                    textContent.classList.add('free-input');
+                }
+            }
+            return;
+        }
+
+        // Cmd+Shift chord completed (second of the two keys pressed) while overlay is visible → close
+        const chordCompleted = (event.key === 'Shift' && prevCmd) || (event.key === 'Meta' && prevShift);
+        if (chordCompleted && overlay.style.display !== 'none') {
             closeOverlay();
+            justClosed = true;
             clearTimeout(autoTranslateTimer);
             if (currentHighlightedElement) {
                 currentHighlightedElement.classList.remove('highlighted-element');
                 currentHighlightedElement = null;
             }
-        } else {
-            manuallyOpened = true;
-            openOverlay();
-            if (!textContent.innerText.trim()) {
-                textContent.classList.add('free-input');
-            }
         }
     });
 
+    window.addEventListener('keyup', (event) => {
+        if (event.key === 'Meta') commandPressed = false;
+        if (event.key === 'Shift') shiftPressed = false;
+        if (!commandPressed && !shiftPressed) justClosed = false;
+    });
+
+    // Hover capture: only while Cmd+Shift held and overlay is not visible
     document.addEventListener('mousemove', (event) => {
-        // Hover capture is active whenever the overlay is visible
-        if (overlay.style.display === 'none') return;
+        if (!commandPressed || !shiftPressed || justClosed) return;
+        if (overlay.style.display !== 'none') return;
+
         const element = document.elementFromPoint(event.clientX, event.clientY);
         if (!element || overlay.contains(element)) return;
 
@@ -817,8 +837,6 @@
                         translateText(trimmed);
                     }, 800);
                 }
-            } else if (!manuallyOpened) {
-                closeOverlay();
             }
         }
 
