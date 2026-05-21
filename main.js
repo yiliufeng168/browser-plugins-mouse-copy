@@ -69,6 +69,7 @@
             padding-left: 10px;
             font-size: 15px;
             word-break: break-word;
+            white-space: pre-wrap;
             color: #d0f0ff;
             user-select: text;
         }
