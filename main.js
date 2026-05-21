@@ -609,7 +609,7 @@
         }
         function md5blks(s) {
             const blks = [], len = s.length;
-            for (let i = 0; i < len * 8; i += 32) blks[i >> 5] |= (s.charCodeAt(i / 8) & 0xFF) << (i % 32);
+            for (let i = 0; i < len * 8; i += 8) blks[i >> 5] |= (s.charCodeAt(i / 8) & 0xFF) << (i % 32);
             blks[len * 8 >> 5] |= 0x80 << (len * 8 % 32);
             blks[(((len * 8 + 64) >>> 9) << 4) + 14] = len * 8;
             return blks;
