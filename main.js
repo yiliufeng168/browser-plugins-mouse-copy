@@ -48,7 +48,7 @@
             white-space: pre-wrap;
             outline: none;
             min-height: 1em;
-            max-height: 420px;
+            max-height: 630px;
             cursor: text;
             overflow-y: auto;
             transition: min-height 0.15s ease;
@@ -80,7 +80,7 @@
         #mouse-text-translation-content {
             flex: 1 1 auto;
             overflow-y: auto;
-            max-height: 400px;
+            max-height: 600px;
             font-size: 15px;
             word-break: break-word;
             white-space: pre-wrap;
@@ -186,7 +186,7 @@
         #mouse-text-codec-hash {
             display: none;
             min-width: 0;
-            max-height: 420px;
+            max-height: 630px;
             overflow-y: auto;
             border-left: 1px solid rgba(255,255,255,0.15);
             padding-left: 10px;
@@ -317,7 +317,7 @@
         #mouse-text-markdown-content {
             flex: 1 1 auto;
             overflow-y: auto;
-            max-height: 400px;
+            max-height: 600px;
             font-size: 13px;
             font-family: monospace;
             word-break: break-word;
