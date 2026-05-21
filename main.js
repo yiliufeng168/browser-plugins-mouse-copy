@@ -10,6 +10,7 @@
 // @grant        GM_getValue
 // @grant        GM_xmlhttpRequest
 // @connect      api.deepseek.com
+// @require      https://cdn.jsdelivr.net/npm/turndown@7.2.0/dist/turndown.js
 // ==/UserScript==
 
 (function() {
@@ -279,6 +280,50 @@
         #mouse-text-codec-btn:hover { opacity: 0.85; }
         #mouse-text-codec-btn:active { transform: scale(0.95); }
         #mouse-text-codec-btn.active { outline: 2px solid rgba(255,255,255,0.45); }
+        #mouse-text-md-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            padding: 5px 10px;
+            border: none;
+            border-radius: 4px;
+            font-size: 13px;
+            cursor: pointer;
+            user-select: none;
+            transition: opacity 0.15s, transform 0.1s;
+            background: linear-gradient(135deg, #0f9b58, #00b4d8);
+            color: white;
+        }
+        #mouse-text-md-btn:hover { opacity: 0.85; }
+        #mouse-text-md-btn:active { transform: scale(0.95); }
+        #mouse-text-md-btn.active { outline: 2px solid rgba(255,255,255,0.45); }
+        #mouse-text-markdown {
+            display: none;
+            flex: 0 0 380px;
+            min-width: 0;
+            flex-direction: column;
+            border-left: 1px solid rgba(255,255,255,0.2);
+            padding-left: 10px;
+            color: #c8f0d0;
+            user-select: text;
+        }
+        #mouse-text-markdown-header {
+            display: flex;
+            justify-content: flex-end;
+            align-items: center;
+            margin-bottom: 4px;
+            flex-shrink: 0;
+        }
+        #mouse-text-markdown-content {
+            flex: 1 1 auto;
+            overflow-y: auto;
+            max-height: 400px;
+            font-size: 13px;
+            font-family: monospace;
+            word-break: break-word;
+            white-space: pre-wrap;
+            line-height: 1.6;
+        }
     `);
 
     // --- DOM structure ---
@@ -323,6 +368,11 @@
     codecBtn.innerHTML = '&#128290; 编解码';
     btnBar.appendChild(codecBtn);
 
+    const mdBtn = document.createElement('button');
+    mdBtn.id = 'mouse-text-md-btn';
+    mdBtn.innerHTML = '&#128196; Markdown';
+    btnBar.appendChild(mdBtn);
+
     const translationPanel = document.createElement('div');
     translationPanel.id = 'mouse-text-translation';
     body.appendChild(translationPanel);
@@ -349,6 +399,24 @@
     const codecHashPanel = document.createElement('div');
     codecHashPanel.id = 'mouse-text-codec-hash';
     body.appendChild(codecHashPanel);
+
+    // --- Markdown panel ---
+    const markdownPanel = document.createElement('div');
+    markdownPanel.id = 'mouse-text-markdown';
+    body.appendChild(markdownPanel);
+
+    const markdownHeader = document.createElement('div');
+    markdownHeader.id = 'mouse-text-markdown-header';
+    markdownPanel.appendChild(markdownHeader);
+
+    const markdownCopyBtn = document.createElement('button');
+    markdownCopyBtn.className = 'codec-copy-btn';
+    markdownCopyBtn.textContent = '复制';
+    markdownHeader.appendChild(markdownCopyBtn);
+
+    const markdownContent = document.createElement('div');
+    markdownContent.id = 'mouse-text-markdown-content';
+    markdownPanel.appendChild(markdownContent);
 
     function makePanel(panel, title) {
         const h = document.createElement('div');
@@ -433,6 +501,7 @@
     const CVE_REGEX = /CVE-\d{4}-\d{4,7}/gi;
     const translationCache = new Map();
     let currentHighlightedElement = null;
+    let currentElementHTML = '';
     let userEditing = false;
     let autoTranslate = false;
     let autoTranslateTimer = null;
@@ -442,6 +511,12 @@
     let shiftPressed = false;
     let mouseMoving = false;
     let mouseMoveTimer = null;
+
+    const turndownService = new TurndownService({
+        headingStyle: 'atx',
+        codeBlockStyle: 'fenced',
+        bulletListMarker: '-',
+    });
 
     // Load persisted auto-translate setting
     (async () => {
@@ -519,31 +594,47 @@
         translationPanel.style.display = 'none';
         codecEncodePanel.style.display = 'none';
         codecHashPanel.style.display = 'none';
+        markdownPanel.style.display = 'none';
         codecBtn.classList.remove('active');
+        mdBtn.classList.remove('active');
         textContent.classList.remove('free-input');
     }
 
     function showTranslation(text) {
         collapseCodecPanel();
-        codecBtn.classList.remove('active');
+        collapseMarkdownPanel();
         translationContent.textContent = text;
         translationPanel.style.display = 'flex';
         overlay.style.display = 'flex';
     }
 
+    function collapseMarkdownPanel() {
+        markdownPanel.style.display = 'none';
+        mdBtn.classList.remove('active');
+        if (overlay.style.display !== 'none') overlay.style.display = 'block';
+    }
+
+    function showMarkdownPanel(html) {
+        collapseTranslation();
+        collapseCodecPanel();
+        let md = '';
+        try { md = turndownService.turndown(html); } catch(e) { md = '转换失败：' + e.message; }
+        markdownContent.textContent = md;
+        markdownPanel.style.display = 'flex';
+        mdBtn.classList.add('active');
+        overlay.style.display = 'flex';
+    }
+
     function collapseTranslation() {
         translationPanel.style.display = 'none';
-        if (overlay.style.display !== 'none') {
-            overlay.style.display = 'block';
-        }
+        if (overlay.style.display !== 'none') overlay.style.display = 'block';
     }
 
     function collapseCodecPanel() {
         codecEncodePanel.style.display = 'none';
         codecHashPanel.style.display = 'none';
-        if (overlay.style.display !== 'none') {
-            overlay.style.display = 'block';
-        }
+        codecBtn.classList.remove('active');
+        if (overlay.style.display !== 'none') overlay.style.display = 'block';
     }
 
     // --- Codec utility functions ---
@@ -673,6 +764,7 @@
     async function showCodecPanel(text) {
         lastEncodedText = text;
         collapseTranslation();
+        collapseMarkdownPanel();
         codecEncodePanel.style.display = 'block';
         codecHashPanel.style.display = 'block';
         overlay.style.display = 'flex';
@@ -783,7 +875,7 @@
         }
 
         collapseCodecPanel();
-        codecBtn.classList.remove('active');
+        collapseMarkdownPanel();
         translationContent.textContent = '';
         translationPanel.style.display = 'flex';
         overlay.style.display = 'flex';
@@ -912,6 +1004,7 @@
             const trimmed = extractStructuredText(element);
 
             if (trimmed) {
+                currentElementHTML = element.outerHTML;
                 textContent.innerHTML = renderWithCVE(trimmed);
                 textContent.classList.remove('free-input');
                 collapseTranslation();
@@ -954,6 +1047,31 @@
             currentHighlightedElement.classList.remove('highlighted-element');
             currentHighlightedElement = null;
         }
+    });
+
+    mdBtn.addEventListener('click', (event) => {
+        event.stopPropagation();
+        if (markdownPanel.style.display !== 'none') {
+            collapseMarkdownPanel();
+        } else {
+            const html = currentElementHTML || textContent.innerHTML;
+            if (html) showMarkdownPanel(html);
+        }
+    });
+
+    markdownCopyBtn.addEventListener('click', (event) => {
+        event.stopPropagation();
+        const text = markdownContent.textContent;
+        if (!text) return;
+        navigator.clipboard.writeText(text).then(() => {
+            const orig = markdownCopyBtn.textContent;
+            markdownCopyBtn.textContent = '✓';
+            markdownCopyBtn.classList.add('copied');
+            setTimeout(() => {
+                markdownCopyBtn.textContent = orig;
+                markdownCopyBtn.classList.remove('copied');
+            }, 1500);
+        }).catch(() => {});
     });
 
     translationCopyBtn.addEventListener('click', (event) => {
