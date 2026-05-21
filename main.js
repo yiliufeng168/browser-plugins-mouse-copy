@@ -63,15 +63,26 @@
             display: none;
             flex: 0 0 360px;
             min-width: 0;
-            max-height: 420px;
-            overflow-y: auto;
+            flex-direction: column;
             border-left: 1px solid rgba(255,255,255,0.2);
             padding-left: 10px;
+            color: #d0f0ff;
+            user-select: text;
+        }
+        #mouse-text-translation-header {
+            display: flex;
+            justify-content: flex-end;
+            align-items: center;
+            margin-bottom: 4px;
+            flex-shrink: 0;
+        }
+        #mouse-text-translation-content {
+            flex: 1 1 auto;
+            overflow-y: auto;
+            max-height: 400px;
             font-size: 15px;
             word-break: break-word;
             white-space: pre-wrap;
-            color: #d0f0ff;
-            user-select: text;
         }
         .cve-tag {
             display: inline-block;
@@ -316,6 +327,19 @@
     translationPanel.id = 'mouse-text-translation';
     body.appendChild(translationPanel);
 
+    const translationHeader = document.createElement('div');
+    translationHeader.id = 'mouse-text-translation-header';
+    translationPanel.appendChild(translationHeader);
+
+    const translationCopyBtn = document.createElement('button');
+    translationCopyBtn.className = 'codec-copy-btn';
+    translationCopyBtn.textContent = '复制';
+    translationHeader.appendChild(translationCopyBtn);
+
+    const translationContent = document.createElement('div');
+    translationContent.id = 'mouse-text-translation-content';
+    translationPanel.appendChild(translationContent);
+
     // --- Encode/decode panel ---
     const codecEncodePanel = document.createElement('div');
     codecEncodePanel.id = 'mouse-text-codec-encode';
@@ -502,8 +526,8 @@
     function showTranslation(text) {
         collapseCodecPanel();
         codecBtn.classList.remove('active');
-        translationPanel.textContent = text;
-        translationPanel.style.display = 'block';
+        translationContent.textContent = text;
+        translationPanel.style.display = 'flex';
         overlay.style.display = 'flex';
     }
 
@@ -760,8 +784,8 @@
 
         collapseCodecPanel();
         codecBtn.classList.remove('active');
-        translationPanel.textContent = '';
-        translationPanel.style.display = 'block';
+        translationContent.textContent = '';
+        translationPanel.style.display = 'flex';
         overlay.style.display = 'flex';
 
         let fullText = '';
@@ -769,11 +793,11 @@
         try {
             await callDeepSeekStream(text, apiKey, (chunk) => {
                 fullText += chunk;
-                translationPanel.textContent = fullText;
+                translationContent.textContent = fullText;
             });
             if (fullText) translationCache.set(text, fullText);
         } catch(e) {
-            translationPanel.textContent = '翻译失败：' + e.message;
+            translationContent.textContent = '翻译失败：' + e.message;
         } finally {
             currentStreamRequest = null;
             if (showLoading) {
@@ -930,6 +954,21 @@
             currentHighlightedElement.classList.remove('highlighted-element');
             currentHighlightedElement = null;
         }
+    });
+
+    translationCopyBtn.addEventListener('click', (event) => {
+        event.stopPropagation();
+        const text = translationContent.textContent;
+        if (!text) return;
+        navigator.clipboard.writeText(text).then(() => {
+            const orig = translationCopyBtn.textContent;
+            translationCopyBtn.textContent = '✓';
+            translationCopyBtn.classList.add('copied');
+            setTimeout(() => {
+                translationCopyBtn.textContent = orig;
+                translationCopyBtn.classList.remove('copied');
+            }, 1500);
+        }).catch(() => {});
     });
 
     closeBtn.addEventListener('click', (event) => {
