@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         Mouse Move Text Extractor with Highlight, Selectable Text, Clipboard Copy, and Centered Notification (Command + Shift + P)
+// @name         Mouse Move Text Extractor with Highlight, Selectable Text, Clipboard Copy, and Centered Notification
 // @namespace    http://tampermonkey.net/
-// @version      0.12
-// @description  Extract text content from elements on mouse hover when Command + Shift + P is pressed, with highlight, selectable text, clipboard copy, DeepSeek translation, encode/decode panel, and centered popup notification
+// @version      0.13
+// @description  Extract text content from elements on mouse hover. Trigger: Cmd+Shift+P (macOS) or Ctrl+Shift+P (Windows/Linux). Features: highlight, selectable text, clipboard copy, DeepSeek translation, encode/decode panel, and centered popup notification
 // @author       You
 // @match        *://*/*
 // @grant        GM_addStyle
@@ -497,6 +497,10 @@
     notification.textContent = 'Text copied to clipboard!';
     document.body.appendChild(notification);
 
+    // --- Platform ---
+    const isMac = /Mac/.test(navigator.userAgent);
+    const modKey = isMac ? 'Meta' : 'Control'; // Cmd on macOS, Ctrl on Windows/Linux
+
     // --- State ---
     const CVE_REGEX = /CVE-\d{4}-\d{4,7}/gi;
     const translationCache = new Map();
@@ -905,15 +909,17 @@
 
     // On macOS, Cmd+Backspace means "delete to line start", not "delete selection".
     // When text is already selected (e.g. via Cmd+A), intercept and delete the selection instead.
-    textContent.addEventListener('keydown', (event) => {
-        if (event.key === 'Backspace' && event.metaKey) {
-            const sel = window.getSelection();
-            if (sel && !sel.isCollapsed) {
-                event.preventDefault();
-                sel.deleteFromDocument();
+    if (isMac) {
+        textContent.addEventListener('keydown', (event) => {
+            if (event.key === 'Backspace' && event.metaKey) {
+                const sel = window.getSelection();
+                if (sel && !sel.isCollapsed) {
+                    event.preventDefault();
+                    sel.deleteFromDocument();
+                }
             }
-        }
-    });
+        });
+    }
 
     autoBtn.addEventListener('click', (event) => {
         event.stopPropagation();
@@ -953,14 +959,15 @@
     codecEncodePanel.addEventListener('click', handleCodecCopy);
     codecHashPanel.addEventListener('click', handleCodecCopy);
 
-    // Cmd+Shift+P → show overlay; Cmd+Shift (chord) → close overlay when visible
+    // Cmd+Shift+P (macOS) / Ctrl+Shift+P (Windows/Linux) → show overlay
+    // Same chord again → close overlay when visible
     window.addEventListener('keydown', (event) => {
         const prevCmd = commandPressed;
         const prevShift = shiftPressed;
-        if (event.key === 'Meta') commandPressed = true;
+        if (event.key === modKey) commandPressed = true;
         if (event.key === 'Shift') shiftPressed = true;
 
-        // Cmd+Shift+P: show overlay if hidden
+        // Mod+Shift+P: show overlay if hidden
         if (event.key.toLowerCase() === 'p' && commandPressed && shiftPressed) {
             event.preventDefault();
             if (overlay.style.display === 'none') {
@@ -972,8 +979,8 @@
             return;
         }
 
-        // Cmd+Shift chord completed while overlay is visible and mouse is idle → close
-        const chordCompleted = (event.key === 'Shift' && prevCmd) || (event.key === 'Meta' && prevShift);
+        // Mod+Shift chord completed while overlay is visible and mouse is idle → close
+        const chordCompleted = (event.key === 'Shift' && prevCmd) || (event.key === modKey && prevShift);
         if (chordCompleted && overlay.style.display !== 'none' && !mouseMoving) {
             closeOverlay();
             clearTimeout(autoTranslateTimer);
@@ -985,7 +992,7 @@
     });
 
     window.addEventListener('keyup', (event) => {
-        if (event.key === 'Meta') commandPressed = false;
+        if (event.key === modKey) commandPressed = false;
         if (event.key === 'Shift') shiftPressed = false;
     });
 
