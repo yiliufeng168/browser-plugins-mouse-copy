@@ -1,10 +1,10 @@
 # Mouse Move Text Extractor
 
-一个 Tampermonkey 用户脚本，在任意网页上按住 **Command + Shift**（Mac）后，鼠标悬停即可提取元素文本内容，支持高亮、编辑、复制、CVE 识别与 DeepSeek AI 翻译。
+一个 Tampermonkey 用户脚本，在任意网页上按住 **Command + Shift**（macOS）或 **Ctrl + Shift**（Windows / Linux）后，鼠标悬停即可提取元素文本内容，支持高亮、编辑、复制、CVE 识别与 DeepSeek AI 翻译。
 
 ## 功能
 
-- **文本提取**：按住 Command + Shift，悬停页面元素实时提取完整文本
+- **文本提取**：按住 Cmd/Ctrl + Shift，悬停页面元素实时提取完整文本
 - **元素高亮**：当前悬停元素黄色背景高亮，移开自动取消
 - **可滚动浮层**：内容过长时垂直滚动，浮层自动避让屏幕角落
 - **内联编辑**：点击浮层内的文本可直接修改，编辑期间鼠标移动不覆盖内容
@@ -26,8 +26,9 @@
 
 | 操作 | 说明 |
 |------|------|
-| 按住 Command + Shift | 激活悬停监听，浮层出现 |
-| 松开按键 | 停止监听，浮层保持显示 |
+| `Cmd+Shift+P`（macOS）/ `Ctrl+Shift+P`（Windows/Linux） | 主动显示浮层（空内容时进入自由输入模式） |
+| 按住 `Cmd+Shift` / `Ctrl+Shift` + 鼠标悬停 | 激活悬停监听，实时提取元素文本 |
+| 松开按键（鼠标静止时） | 关闭浮层 |
 | 点击文本区域 | 进入编辑模式，可手动修改内容 |
 | 点击 CVE 标签 | 复制单个 CVE 编号 |
 | 点击 📋 复制 | 复制浮层内全部文本 |
@@ -64,6 +65,11 @@ API Key 申请地址：[platform.deepseek.com](https://platform.deepseek.com/)
 
 | 版本 | 变更 |
 |------|------|
+| 0.13 | 跨平台支持：Windows/Linux 使用 Ctrl+Shift+P，macOS 保持 Cmd+Shift+P |
+| 0.12 | 弹窗各面板宽度放大 1.5 倍 |
+| 0.11 | 弹窗内容区高度放大 1.5 倍 |
+| 0.10 | 新增 Markdown 转换面板（Turndown） |
+| 0.9 | 翻译面板添加复制按钮、流式输出 |
 | 0.8 | 增加自动翻译开关、翻译缓存、修复关闭按钮 bug |
 | 0.7 | 增加 DeepSeek 翻译、去除字符限制、滚动条、可编辑文本 |
 | 0.6 | 增加关闭按钮、CVE 标签点击复制 |
