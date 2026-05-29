@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mouse Move Text Extractor with Highlight, Selectable Text, Clipboard Copy, and Centered Notification
 // @namespace    http://tampermonkey.net/
-// @version      0.13
+// @version      0.14
 // @description  Extract text content from elements on mouse hover. Trigger: Cmd+Shift+P (macOS) or Ctrl+Shift+P (Windows/Linux). Features: highlight, selectable text, clipboard copy, DeepSeek translation, encode/decode panel, and centered popup notification
 // @author       You
 // @match        *://*/*
@@ -832,7 +832,13 @@
                 url: 'https://api.deepseek.com/chat/completions',
                 headers: {
                     'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${apiKey}`
+                    'Authorization': `Bearer ${apiKey}`,
+                    // Disable response compression so Tampermonkey can expose partial
+                    // responseText during onprogress. A gzip/br-compressed stream can only
+                    // be decompressed once fully received, which makes streaming arrive
+                    // all-at-once instead of incrementally.
+                    'Accept-Encoding': 'identity',
+                    'Accept': 'text/event-stream'
                 },
                 data: JSON.stringify({
                     model: 'deepseek-chat',
