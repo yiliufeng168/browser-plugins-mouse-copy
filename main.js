@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mouse Move Text Extractor with Highlight, Selectable Text, Clipboard Copy, and Centered Notification
 // @namespace    http://tampermonkey.net/
-// @version      0.15
+// @version      0.16
 // @description  Extract text content from elements on mouse hover. Trigger: Cmd+Shift+P (macOS) or Ctrl+Shift+P (Windows/Linux). Features: highlight, selectable text, clipboard copy, DeepSeek translation, encode/decode panel, and centered popup notification
 // @author       You
 // @match        *://*/*
@@ -541,37 +541,49 @@
     }
 
     // --- 自动翻译内容判定 ---
-    const AT_MIN_LETTERS      = 4;    // 至少 4 个字母，否则太短
-    const AT_LETTER_RATIO_MIN = 0.5;  // 字母须占非空白字符的一半以上（过滤数字/符号/代码堆）
-    const AT_MAX_SPACELESS    = 24;   // 无空白且长度超此值 → 视为 ID/哈希/URL，不翻译
-    const AT_FOREIGN_RATIO    = 0.3;  // 非中文字母占全部字母的比例阈值
+    // 思路：自动翻译只为「看不懂的外文」服务。只要文本里已经有相当比例的中文，
+    // 用户基本能看懂（英文多为产品名/技术名词），就不翻译；只有中文极少、
+    // 外文占绝对主导时才翻译。日文假名 / 韩文谚文一旦出现即判定为非中文。
+    const AT_MIN_LETTERS      = 4;     // 至少 4 个字母，否则太短
+    const AT_LETTER_RATIO_MIN = 0.5;   // 字母须占非空白字符的一半以上（过滤数字/符号/代码堆）
+    const AT_MAX_SPACELESS    = 24;    // 无空白且长度超此值 → 视为 ID/哈希/URL，不翻译
+    const AT_SYMBOL_RATIO_MAX = 0.15;  // 符号占非空白字符超此值 → 视为代码/标记，不翻译
+    const AT_ALPHA_RATIO_MIN  = 0.8;   // 拉丁等外文字母须占字母 ≥80%（即中文 ≤20%）才翻译
+    const AT_KANA_RATIO_MIN   = 0.15;  // 日文假名/韩文谚文占字母达到此值即判为非中文，直接翻译
 
     function shouldAutoTranslate(text) {
         const t = (text || '').trim();
         if (t.length < AT_MIN_LETTERS) return false;
 
-        let han = 0, foreign = 0, digit = 0, space = 0, symbol = 0;
+        let han = 0, kana = 0, alpha = 0, digit = 0, space = 0, symbol = 0;
         for (const ch of t) {
             if (/\s/.test(ch)) space++;
-            else if (/\p{Script=Han}/u.test(ch)) han++;   // 汉字视为中文
-            else if (/\p{L}/u.test(ch)) foreign++;        // 其它字母（含日文假名、韩文谚文）视为外文
+            else if (/\p{Script=Han}/u.test(ch)) han++;                                   // 汉字视为中文
+            else if (/\p{Script=Hiragana}|\p{Script=Katakana}|\p{Script=Hangul}/u.test(ch)) kana++; // 日文假名 / 韩文谚文
+            else if (/\p{L}/u.test(ch)) alpha++;                                          // 拉丁/西里尔/希腊等外文字母
             else if (/\p{N}/u.test(ch)) digit++;
             else symbol++;
         }
 
-        const letters  = han + foreign;
+        const letters  = han + kana + alpha;
         const nonSpace = letters + digit + symbol;
         if (nonSpace === 0) return false;
 
-        // (a) 可理解文本：字母须占主导，过滤以数字/符号为主的内容（代码、数字表、ID）
+        // (a) 可理解文本：字母须占主导，过滤以数字/符号为主的内容（数字表、ID）
         if (letters < AT_MIN_LETTERS) return false;
         if (letters / nonSpace < AT_LETTER_RATIO_MIN) return false;
 
-        // (b) 长且无空白 → 标识符/哈希/URL，非自然语言
+        // (b) 符号密度过高 → 代码/标记，非自然语言
+        if (symbol / nonSpace > AT_SYMBOL_RATIO_MAX) return false;
+
+        // (c) 长且无空白 → 标识符/哈希/URL，非自然语言
         if (space === 0 && t.length > AT_MAX_SPACELESS) return false;
 
-        // (c) 非中文字母占比须达到阈值
-        return (foreign / letters) >= AT_FOREIGN_RATIO;
+        // (d) 出现足够的日文假名/韩文谚文 → 明确是非中文，直接翻译
+        if (kana / letters >= AT_KANA_RATIO_MIN) return true;
+
+        // (e) 中文已占相当比例（用户能看懂）则不翻译；仅当外文占绝对主导才翻译
+        return (alpha / letters) >= AT_ALPHA_RATIO_MIN;
     }
 
     function extractStructuredText(element) {
