@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mouse Move Text Extractor with Highlight, Selectable Text, Clipboard Copy, and Centered Notification
 // @namespace    http://tampermonkey.net/
-// @version      0.14
+// @version      0.15
 // @description  Extract text content from elements on mouse hover. Trigger: Cmd+Shift+P (macOS) or Ctrl+Shift+P (Windows/Linux). Features: highlight, selectable text, clipboard copy, DeepSeek translation, encode/decode panel, and centered popup notification
 // @author       You
 // @match        *://*/*
@@ -540,6 +540,40 @@
         );
     }
 
+    // --- 自动翻译内容判定 ---
+    const AT_MIN_LETTERS      = 4;    // 至少 4 个字母，否则太短
+    const AT_LETTER_RATIO_MIN = 0.5;  // 字母须占非空白字符的一半以上（过滤数字/符号/代码堆）
+    const AT_MAX_SPACELESS    = 24;   // 无空白且长度超此值 → 视为 ID/哈希/URL，不翻译
+    const AT_FOREIGN_RATIO    = 0.3;  // 非中文字母占全部字母的比例阈值
+
+    function shouldAutoTranslate(text) {
+        const t = (text || '').trim();
+        if (t.length < AT_MIN_LETTERS) return false;
+
+        let han = 0, foreign = 0, digit = 0, space = 0, symbol = 0;
+        for (const ch of t) {
+            if (/\s/.test(ch)) space++;
+            else if (/\p{Script=Han}/u.test(ch)) han++;   // 汉字视为中文
+            else if (/\p{L}/u.test(ch)) foreign++;        // 其它字母（含日文假名、韩文谚文）视为外文
+            else if (/\p{N}/u.test(ch)) digit++;
+            else symbol++;
+        }
+
+        const letters  = han + foreign;
+        const nonSpace = letters + digit + symbol;
+        if (nonSpace === 0) return false;
+
+        // (a) 可理解文本：字母须占主导，过滤以数字/符号为主的内容（代码、数字表、ID）
+        if (letters < AT_MIN_LETTERS) return false;
+        if (letters / nonSpace < AT_LETTER_RATIO_MIN) return false;
+
+        // (b) 长且无空白 → 标识符/哈希/URL，非自然语言
+        if (space === 0 && t.length > AT_MAX_SPACELESS) return false;
+
+        // (c) 非中文字母占比须达到阈值
+        return (foreign / letters) >= AT_FOREIGN_RATIO;
+    }
+
     function extractStructuredText(element) {
         const BLOCK = new Set([
             'P','DIV','SECTION','ARTICLE','HEADER','FOOTER','MAIN','NAV','ASIDE',
@@ -1025,7 +1059,7 @@
                 codecBtn.classList.remove('active');
                 openOverlay();
 
-                if (autoTranslate && trimmed.length <= 500) {
+                if (autoTranslate && trimmed.length <= 500 && shouldAutoTranslate(trimmed)) {
                     clearTimeout(autoTranslateTimer);
                     autoTranslateTimer = setTimeout(() => {
                         translateText(trimmed);
