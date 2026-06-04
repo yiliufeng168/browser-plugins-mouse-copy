@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mouse Move Text Extractor with Highlight, Selectable Text, Clipboard Copy, and Centered Notification
 // @namespace    http://tampermonkey.net/
-// @version      0.16
+// @version      0.17
 // @description  Extract text content from elements on mouse hover. Trigger: Cmd+Shift+P (macOS) or Ctrl+Shift+P (Windows/Linux). Features: highlight, selectable text, clipboard copy, DeepSeek translation, encode/decode panel, and centered popup notification
 // @author       You
 // @match        *://*/*
@@ -1071,8 +1071,12 @@
                 codecBtn.classList.remove('active');
                 openOverlay();
 
+                // Content panel changed → cancel any pending auto-translate from a
+                // previous element, otherwise a stale timer would translate the old
+                // text while the panel already shows the new one (content/translation
+                // mismatch). Re-arm only if the *current* text is eligible.
+                clearTimeout(autoTranslateTimer);
                 if (autoTranslate && trimmed.length <= 500 && shouldAutoTranslate(trimmed)) {
-                    clearTimeout(autoTranslateTimer);
                     autoTranslateTimer = setTimeout(() => {
                         translateText(trimmed);
                     }, 800);
