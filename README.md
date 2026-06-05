@@ -17,11 +17,21 @@
 
 ## 安装
 
+**方式一（推荐，一键安装）**：装好 [Tampermonkey](https://www.tampermonkey.net/) 后，直接打开下面的链接，Tampermonkey 会自动弹出安装/更新确认页：
+
+```
+https://raw.githubusercontent.com/yiliufeng168/browser-plugins-mouse-copy/main/main.user.js
+```
+
+**方式二（手动粘贴）**：
+
 1. 安装 [Tampermonkey](https://www.tampermonkey.net/) 浏览器扩展
 2. 点击 Tampermonkey 图标 → **创建新脚本**
-3. 将 `main.js` 的内容完整粘贴并保存
+3. 将 `main.user.js` 的内容完整粘贴并保存
 
 > 首次安装时 Tampermonkey 会提示授权 `GM_xmlhttpRequest` 访问 `api.deepseek.com`，需要允许。
+>
+> 文件名以 `.user.js` 结尾是关键：只有这样 Tampermonkey 才会把链接识别为可安装脚本并弹出安装页，从而实现一键安装/更新（普通 `.js` 链接只会显示源码）。
 
 ## 使用
 
@@ -71,24 +81,24 @@ API Key 申请地址：[platform.deepseek.com](https://platform.deepseek.com/)
 | 头部字段 | 指向 | 用途 |
 |----------|------|------|
 | `@updateURL` | `main.meta.js`（仅元数据块，几百字节） | 检查更新时只拉这个小文件读版本号 |
-| `@downloadURL` | `main.js`（完整脚本） | 确认有新版本后才下载完整脚本安装 |
+| `@downloadURL` | `main.user.js`（完整脚本） | 确认有新版本后才下载完整脚本安装 |
 
 ```
 @updateURL   https://raw.githubusercontent.com/yiliufeng168/browser-plugins-mouse-copy/main/main.meta.js
-@downloadURL https://raw.githubusercontent.com/yiliufeng168/browser-plugins-mouse-copy/main/main.js
+@downloadURL https://raw.githubusercontent.com/yiliufeng168/browser-plugins-mouse-copy/main/main.user.js
 ```
 
-这样每次轮询只传输几百字节而非整个脚本，是 `@updateURL` 的标准用法。
+这样每次轮询只传输几百字节而非整个脚本，是 `@updateURL` 的标准用法。`@downloadURL` 用 `.user.js` 结尾，Tampermonkey 才能识别并一键安装更新（点击「立即更新」或后台更新都会直接弹安装页，不会跳到源码）。
 
 - **后台更新**：Tampermonkey 按其设置周期自动检查并更新（可在设置中调整频率，或在控制面板手动「检查脚本更新」）
 - **页面提示**：脚本每 6 小时拉取一次 `main.meta.js` 的版本号，发现更高版本时在页面顶部弹出横幅，支持「立即更新 / 忽略此版本」
 - **手动检查**：点击 Tampermonkey 图标 → 本脚本菜单 → **检查更新**
 
-> 发布新版本时**只需修改 `main.js` 头部的 `@version`**——`main.meta.js` 会由 git `pre-commit` 钩子自动同步生成，无需手工编辑，然后推送到仓库 `main` 分支即可。
+> 发布新版本时**只需修改 `main.user.js` 头部的 `@version`**——`main.meta.js` 会由 git `pre-commit` 钩子自动同步生成，无需手工编辑，然后推送到仓库 `main` 分支即可。
 
 ### 维护者：main.meta.js 自动同步
 
-`main.meta.js` 由 `main.js` 的元数据块自动生成，提交时通过 git 钩子保持一致：
+`main.meta.js` 由 `main.user.js` 的元数据块自动生成，提交时通过 git 钩子保持一致：
 
 - 钩子脚本：`.githooks/pre-commit` → 调用 `scripts/gen-meta.sh`
 - 每次 `git commit` 会自动重新生成 `main.meta.js` 并加入本次提交
@@ -104,6 +114,7 @@ API Key 申请地址：[platform.deepseek.com](https://platform.deepseek.com/)
 
 | 版本 | 变更 |
 |------|------|
+| 0.21 | 脚本文件更名为 `main.user.js`：以 `.user.js` 结尾后，Tampermonkey 才会把链接识别为可安装脚本，点击「立即更新」或后台更新即可一键安装（不再跳转 GitHub 源码、手动复制）；`@downloadURL` 与一键安装链接同步更新 |
 | 0.20 | 修复点击复制后浮层内容卡住的问题：复制后面板仍持有编辑焦点（`userEditing` 锁未释放），导致按住快捷键悬停新元素时内容不刷新；现改为按住快捷键悬停到新元素即解除该锁。移除复制成功后丑陋的居中绿色弹窗，仅保留「复制 → 已复制 → 复制」的按钮文字反馈 |
 | 0.19 | 修复代码/预格式化内容提取丢失换行的问题：`<pre>` 及内联 `white-space:pre*` 上下文保留原始换行与缩进（普通文本仍折叠空白）；自动翻译新增 Burp Suite / 原始 HTTP 报文识别，请求行/状态行开头的内容跳过自动翻译（手动翻译不受影响） |
 | 0.18 | 新增自动更新：接入 Tampermonkey `@updateURL`/`@downloadURL` 后台更新，并在脚本内增加远程版本检查、页面更新提示横幅与「检查更新」菜单项 |

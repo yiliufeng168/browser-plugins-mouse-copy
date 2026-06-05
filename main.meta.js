@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mouse Move Text Extractor with Highlight, Selectable Text, Clipboard Copy, and Centered Notification
 // @namespace    http://tampermonkey.net/
-// @version      0.20
+// @version      0.21
 // @description  Extract text content from elements on mouse hover. Trigger: Cmd+Shift+P (macOS) or Ctrl+Shift+P (Windows/Linux). Features: highlight, selectable text, clipboard copy, DeepSeek translation, encode/decode panel
 // @author       You
 // @match        *://*/*
@@ -16,5 +16,5 @@
 // @homepageURL  https://github.com/yiliufeng168/browser-plugins-mouse-copy
 // @supportURL   https://github.com/yiliufeng168/browser-plugins-mouse-copy/issues
 // @updateURL    https://raw.githubusercontent.com/yiliufeng168/browser-plugins-mouse-copy/main/main.meta.js
-// @downloadURL  https://raw.githubusercontent.com/yiliufeng168/browser-plugins-mouse-copy/main/main.js
+// @downloadURL  https://raw.githubusercontent.com/yiliufeng168/browser-plugins-mouse-copy/main/main.user.js
 // ==/UserScript==

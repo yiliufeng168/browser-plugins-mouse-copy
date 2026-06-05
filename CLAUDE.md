@@ -6,23 +6,25 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Single-file Tampermonkey userscript that enables text extraction, encoding/hashing, and AI translation directly on any webpage via keyboard+mouse interaction.
 
-**No build system, no package manager, no tests.** The script is `main.js`; `main.meta.js` is a hand-maintained copy of just its `==UserScript==` metadata block, used as the lightweight `@updateURL` target. Changes are validated by manually pasting the updated script into Tampermonkey's editor and testing in a browser.
+**No build system, no package manager, no tests.** The script is `main.user.js` (the `.user.js` suffix is required so Tampermonkey treats its raw URL as an installable script → one-click install/update); `main.meta.js` is the auto-generated copy of just its `==UserScript==` metadata block, used as the lightweight `@updateURL` target. Changes are validated by manually pasting the updated script into Tampermonkey's editor and testing in a browser.
 
 ## Auto-Update
 
-Tampermonkey native update via header directives: `@updateURL` → `main.meta.js` (metadata-only, cheap version poll), `@downloadURL` → `main.js` (full script). An in-script notifier (end of the IIFE) polls `main.meta.js` every 6h, compares `@version` numerically, and shows a top banner + registers a "检查更新" menu command.
+Tampermonkey native update via header directives: `@updateURL` → `main.meta.js` (metadata-only, cheap version poll), `@downloadURL` → `main.user.js` (full script; `.user.js` so Tampermonkey installs it directly instead of showing source). An in-script notifier (end of the IIFE) polls `main.meta.js` every 6h, compares `@version` numerically, and shows a top banner + registers a "检查更新" menu command.
 
-`main.meta.js` is generated, not hand-edited: edit only `main.js`'s header. A `pre-commit` hook (`.githooks/pre-commit` → `scripts/gen-meta.sh`) extracts the `==UserScript==` block from `main.js` into `main.meta.js` and stages it on every commit, so the two blocks (esp. `@version`) can never drift. Run `sh scripts/gen-meta.sh` to regenerate manually.
+`main.meta.js` is generated, not hand-edited: edit only `main.user.js`'s header. A `pre-commit` hook (`.githooks/pre-commit` → `scripts/gen-meta.sh`) extracts the `==UserScript==` block from `main.user.js` into `main.meta.js` and stages it on every commit, so the two blocks (esp. `@version`) can never drift. Run `sh scripts/gen-meta.sh` to regenerate manually.
 
 The hook lives in the repo but `core.hooksPath` is local git config, **not** cloned — after a fresh clone run once: `git config core.hooksPath .githooks`.
 
 ## Installation / Deployment
 
 1. Open Tampermonkey → "Create new script"
-2. Paste the contents of `main.js`
+2. Paste the contents of `main.user.js`
 3. Save — the script activates on all pages immediately
 
-## Architecture of `main.js`
+(Or open the raw `main.user.js` URL directly — Tampermonkey intercepts `.user.js` links and shows the install page.)
+
+## Architecture of `main.user.js`
 
 The file is a ~1140-line monolith organized in vertical sections:
 

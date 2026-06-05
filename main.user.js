@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mouse Move Text Extractor with Highlight, Selectable Text, Clipboard Copy, and Centered Notification
 // @namespace    http://tampermonkey.net/
-// @version      0.20
+// @version      0.21
 // @description  Extract text content from elements on mouse hover. Trigger: Cmd+Shift+P (macOS) or Ctrl+Shift+P (Windows/Linux). Features: highlight, selectable text, clipboard copy, DeepSeek translation, encode/decode panel
 // @author       You
 // @match        *://*/*
@@ -16,7 +16,7 @@
 // @homepageURL  https://github.com/yiliufeng168/browser-plugins-mouse-copy
 // @supportURL   https://github.com/yiliufeng168/browser-plugins-mouse-copy/issues
 // @updateURL    https://raw.githubusercontent.com/yiliufeng168/browser-plugins-mouse-copy/main/main.meta.js
-// @downloadURL  https://raw.githubusercontent.com/yiliufeng168/browser-plugins-mouse-copy/main/main.js
+// @downloadURL  https://raw.githubusercontent.com/yiliufeng168/browser-plugins-mouse-copy/main/main.user.js
 // ==/UserScript==
 
 (function() {
@@ -1271,12 +1271,12 @@
     // 检查更新只拉取轻量的 .meta.js（仅元数据块，几百字节），确认有新版本后
     // 才打开完整脚本进行安装——避免每次轮询都下载整个脚本。
     const UPDATE_META_URL = 'https://raw.githubusercontent.com/yiliufeng168/browser-plugins-mouse-copy/main/main.meta.js';
-    const UPDATE_DOWNLOAD_URL = 'https://raw.githubusercontent.com/yiliufeng168/browser-plugins-mouse-copy/main/main.js';
+    const UPDATE_DOWNLOAD_URL = 'https://raw.githubusercontent.com/yiliufeng168/browser-plugins-mouse-copy/main/main.user.js';
     const UPDATE_CHECK_INTERVAL = 6 * 60 * 60 * 1000; // 自动检查间隔：6 小时
 
     function currentVersion() {
-        try { return (GM_info && GM_info.script && GM_info.script.version) || '0.20'; }
-        catch (e) { return '0.20'; }
+        try { return (GM_info && GM_info.script && GM_info.script.version) || '0.21'; }
+        catch (e) { return '0.21'; }
     }
 
     function parseVersion(v) {
