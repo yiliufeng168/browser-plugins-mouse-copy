@@ -66,17 +66,25 @@ API Key 申请地址：[platform.deepseek.com](https://platform.deepseek.com/)
 
 ## 自动更新
 
-脚本头部声明了 `@updateURL` 与 `@downloadURL`，指向 GitHub 仓库的原始脚本：
+脚本采用 Tampermonkey 推荐的 **meta / download 分离**模式：
+
+| 头部字段 | 指向 | 用途 |
+|----------|------|------|
+| `@updateURL` | `main.meta.js`（仅元数据块，几百字节） | 检查更新时只拉这个小文件读版本号 |
+| `@downloadURL` | `main.js`（完整脚本） | 确认有新版本后才下载完整脚本安装 |
 
 ```
-https://raw.githubusercontent.com/yiliufeng168/browser-plugins-mouse-copy/main/main.js
+@updateURL   https://raw.githubusercontent.com/yiliufeng168/browser-plugins-mouse-copy/main/main.meta.js
+@downloadURL https://raw.githubusercontent.com/yiliufeng168/browser-plugins-mouse-copy/main/main.js
 ```
 
-- **后台更新**：Tampermonkey 会按其设置周期自动检查并更新（可在 Tampermonkey 设置中调整检查频率，或在控制面板手动「检查脚本更新」）
-- **页面提示**：脚本每 6 小时拉取一次远程版本号，发现更高版本时在页面顶部弹出横幅，支持「立即更新 / 忽略此版本」
+这样每次轮询只传输几百字节而非整个脚本，是 `@updateURL` 的标准用法。
+
+- **后台更新**：Tampermonkey 按其设置周期自动检查并更新（可在设置中调整频率，或在控制面板手动「检查脚本更新」）
+- **页面提示**：脚本每 6 小时拉取一次 `main.meta.js` 的版本号，发现更高版本时在页面顶部弹出横幅，支持「立即更新 / 忽略此版本」
 - **手动检查**：点击 Tampermonkey 图标 → 本脚本菜单 → **检查更新**
 
-> 升级方式：只需提升 `main.js` 头部的 `@version` 号并推送到仓库 `main` 分支，已安装的脚本即可被检测到更新。
+> ⚠️ **发布新版本时，必须同时提升 `main.js` 与 `main.meta.js` 头部的 `@version`**（两者元数据块需保持一致），再推送到仓库 `main` 分支，已安装的脚本才能检测到更新。
 
 ## 版本历史
 

@@ -15,7 +15,7 @@
 // @require      https://cdn.jsdelivr.net/npm/turndown@7.2.0/dist/turndown.js
 // @homepageURL  https://github.com/yiliufeng168/browser-plugins-mouse-copy
 // @supportURL   https://github.com/yiliufeng168/browser-plugins-mouse-copy/issues
-// @updateURL    https://raw.githubusercontent.com/yiliufeng168/browser-plugins-mouse-copy/main/main.js
+// @updateURL    https://raw.githubusercontent.com/yiliufeng168/browser-plugins-mouse-copy/main/main.meta.js
 // @downloadURL  https://raw.githubusercontent.com/yiliufeng168/browser-plugins-mouse-copy/main/main.js
 // ==/UserScript==
 
@@ -1260,8 +1260,10 @@
     // raw script on GitHub, compares @version, and surfaces a banner when a newer
     // release is out — so the user knows immediately instead of waiting for the next
     // silent background check.
-    const UPDATE_RAW_URL = 'https://raw.githubusercontent.com/yiliufeng168/browser-plugins-mouse-copy/main/main.js';
-    const UPDATE_REPO_URL = 'https://github.com/yiliufeng168/browser-plugins-mouse-copy';
+    // 检查更新只拉取轻量的 .meta.js（仅元数据块，几百字节），确认有新版本后
+    // 才打开完整脚本进行安装——避免每次轮询都下载整个脚本。
+    const UPDATE_META_URL = 'https://raw.githubusercontent.com/yiliufeng168/browser-plugins-mouse-copy/main/main.meta.js';
+    const UPDATE_DOWNLOAD_URL = 'https://raw.githubusercontent.com/yiliufeng168/browser-plugins-mouse-copy/main/main.js';
     const UPDATE_CHECK_INTERVAL = 6 * 60 * 60 * 1000; // 自动检查间隔：6 小时
 
     function currentVersion() {
@@ -1306,9 +1308,8 @@
         updateBtn.className = 'ucb-update';
         updateBtn.textContent = '立即更新';
         updateBtn.addEventListener('click', () => {
-            // 打开 .user.js 安装入口（Tampermonkey 会拦截并弹出更新确认）；
-            // 同时也提供原始脚本链接作为兜底。
-            window.open(UPDATE_RAW_URL, '_blank');
+            // 打开完整脚本，触发 Tampermonkey 安装/更新流程
+            window.open(UPDATE_DOWNLOAD_URL, '_blank');
             updateBanner.remove();
         });
 
@@ -1343,7 +1344,7 @@
 
         GM_xmlhttpRequest({
             method: 'GET',
-            url: UPDATE_RAW_URL + '?t=' + Date.now(), // 绕过 CDN 缓存
+            url: UPDATE_META_URL + '?t=' + Date.now(), // 仅拉取元数据，绕过 CDN 缓存
             onload: async (res) => {
                 if (res.status < 200 || res.status >= 300) {
                     if (manual) alert('检查更新失败：HTTP ' + res.status);

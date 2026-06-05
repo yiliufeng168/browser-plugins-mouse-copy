@@ -6,7 +6,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Single-file Tampermonkey userscript that enables text extraction, encoding/hashing, and AI translation directly on any webpage via keyboard+mouse interaction.
 
-**No build system, no package manager, no tests.** The entire project is `main.js`. Changes are validated by manually pasting the updated script into Tampermonkey's editor and testing in a browser.
+**No build system, no package manager, no tests.** The script is `main.js`; `main.meta.js` is a hand-maintained copy of just its `==UserScript==` metadata block, used as the lightweight `@updateURL` target. Changes are validated by manually pasting the updated script into Tampermonkey's editor and testing in a browser.
+
+## Auto-Update
+
+Tampermonkey native update via header directives: `@updateURL` → `main.meta.js` (metadata-only, cheap version poll), `@downloadURL` → `main.js` (full script). An in-script notifier (end of the IIFE) polls `main.meta.js` every 6h, compares `@version` numerically, and shows a top banner + registers a "检查更新" menu command.
+
+**When bumping the version, change `@version` in BOTH `main.js` and `main.meta.js`** — the two metadata blocks must stay identical, or update detection breaks.
 
 ## Installation / Deployment
 
