@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Mouse Move Text Extractor with Highlight, Selectable Text, Clipboard Copy, and Centered Notification
 // @namespace    http://tampermonkey.net/
-// @version      0.19
-// @description  Extract text content from elements on mouse hover. Trigger: Cmd+Shift+P (macOS) or Ctrl+Shift+P (Windows/Linux). Features: highlight, selectable text, clipboard copy, DeepSeek translation, encode/decode panel, and centered popup notification
+// @version      0.20
+// @description  Extract text content from elements on mouse hover. Trigger: Cmd+Shift+P (macOS) or Ctrl+Shift+P (Windows/Linux). Features: highlight, selectable text, clipboard copy, DeepSeek translation, encode/decode panel
 // @author       You
 // @match        *://*/*
 // @grant        GM_addStyle
@@ -160,19 +160,6 @@
             cursor: default;
         }
         .highlighted-element { background-color: rgba(255, 255, 0, 0.5); }
-        #copy-notification {
-            position: fixed;
-            background-color: rgba(0, 255, 0, 0.8);
-            color: white;
-            padding: 10px;
-            font-size: 16px;
-            border-radius: 5px;
-            z-index: 9998;
-            display: none;
-            transform: translate(-50%, -50%);
-            top: 50%;
-            left: 50%;
-        }
         #mouse-text-close-btn {
             position: absolute;
             top: 4px;
@@ -547,11 +534,6 @@
     overlay.appendChild(closeBtn);
 
     document.body.appendChild(overlay);
-
-    const notification = document.createElement('div');
-    notification.id = 'copy-notification';
-    notification.textContent = 'Text copied to clipboard!';
-    document.body.appendChild(notification);
 
     // --- Platform ---
     const isMac = /Mac/.test(navigator.userAgent);
@@ -1134,6 +1116,15 @@
         const element = document.elementFromPoint(event.clientX, event.clientY);
         if (!element || overlay.contains(element)) return;
 
+        // While the hotkey is held, hovering a *new* page element is an explicit
+        // "extract this" intent. Drop any stale editing lock (e.g. focus left on the
+        // panel after clicking 复制) so content refreshes instead of staying frozen.
+        // A stationary cursor (same element) keeps the lock, so in-panel edits stay safe.
+        if (userEditing && element !== currentHighlightedElement) {
+            userEditing = false;
+            textContent.blur();
+        }
+
         if (!userEditing) {
             const trimmed = extractStructuredText(element);
 
@@ -1263,8 +1254,6 @@
                 copyBtn.innerHTML = '&#128203; 复制';
                 copyBtn.classList.remove('copied');
             }, 2000);
-            notification.style.display = 'block';
-            setTimeout(() => { notification.style.display = 'none'; }, 2000);
         }).catch(err => console.error('Failed to copy text: ', err));
     });
 
@@ -1286,8 +1275,8 @@
     const UPDATE_CHECK_INTERVAL = 6 * 60 * 60 * 1000; // 自动检查间隔：6 小时
 
     function currentVersion() {
-        try { return (GM_info && GM_info.script && GM_info.script.version) || '0.19'; }
-        catch (e) { return '0.19'; }
+        try { return (GM_info && GM_info.script && GM_info.script.version) || '0.20'; }
+        catch (e) { return '0.20'; }
     }
 
     function parseVersion(v) {
