@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mouse Move Text Extractor with Highlight, Selectable Text, Clipboard Copy, and Centered Notification
 // @namespace    http://tampermonkey.net/
-// @version      0.18
+// @version      0.19
 // @description  Extract text content from elements on mouse hover. Trigger: Cmd+Shift+P (macOS) or Ctrl+Shift+P (Windows/Linux). Features: highlight, selectable text, clipboard copy, DeepSeek translation, encode/decode panel, and centered popup notification
 // @author       You
 // @match        *://*/*
@@ -607,9 +607,19 @@
     const AT_ALPHA_RATIO_MIN  = 0.8;   // 拉丁等外文字母须占字母 ≥80%（即中文 ≤20%）才翻译
     const AT_KANA_RATIO_MIN   = 0.15;  // 日文假名/韩文谚文占字母达到此值即判为非中文，直接翻译
 
+    // 识别 Burp Suite / 原始 HTTP 报文：请求行 (METHOD … HTTP/x.y) 或状态行 (HTTP/x.y NNN)。
+    // 起始锚定、不依赖换行，故无论提取格式是否保留都能判定。
+    function looksLikeHttpPacket(text) {
+        const t = (text || '').trimStart();
+        if (/^(GET|POST|PUT|DELETE|HEAD|OPTIONS|PATCH|TRACE|CONNECT)\s+\S+\s+HTTP\/\d(\.\d)?\b/i.test(t)) return true;
+        if (/^HTTP\/\d(\.\d)?\s+\d{3}\b/i.test(t)) return true;
+        return false;
+    }
+
     function shouldAutoTranslate(text) {
         const t = (text || '').trim();
         if (t.length < AT_MIN_LETTERS) return false;
+        if (looksLikeHttpPacket(t)) return false; // Burp/HTTP 报文不自动翻译
 
         let han = 0, kana = 0, alpha = 0, digit = 0, space = 0, symbol = 0;
         for (const ch of t) {
@@ -649,15 +659,16 @@
             'ADDRESS','DETAILS','SUMMARY','TABLE','THEAD','TBODY','TFOOT','TR','DD','DT'
         ]);
 
-        function walkChildren(node) {
+        function walkChildren(node, pre) {
             let s = '';
-            for (const child of node.childNodes) s += walk(child);
+            for (const child of node.childNodes) s += walk(child, pre);
             return s;
         }
 
-        function walk(node) {
+        function walk(node, pre) {
             if (node.nodeType === 3) { // TEXT_NODE
-                return node.textContent.replace(/[\r\n\t ]+/g, ' ');
+                // 预格式化上下文（<pre> 等）保留原始换行/缩进；普通文本折叠空白。
+                return pre ? node.textContent : node.textContent.replace(/[\r\n\t ]+/g, ' ');
             }
             if (node.nodeType !== 1) return ''; // not ELEMENT_NODE
             const tag = node.tagName;
@@ -665,30 +676,38 @@
             if (tag === 'BR') return '\n';
             if (tag === 'HR') return '\n───\n';
 
+            // 进入预格式化上下文：<pre> 或内联 white-space:pre*（不查 getComputedStyle，避免悬停热路径开销）
+            const inPre = pre || tag === 'PRE' ||
+                (node.style && /^pre/.test(node.style.whiteSpace));
+
             if (tag === 'UL' || tag === 'OL') {
                 let result = '', idx = 0;
                 for (const child of node.childNodes) {
                     if (child.nodeType === 1 && child.tagName === 'LI') {
                         idx++;
                         const prefix = tag === 'OL' ? `${idx}. ` : '• ';
-                        const content = walkChildren(child).trim();
+                        const content = walkChildren(child, inPre).trim();
                         if (content) result += prefix + content + '\n';
                     } else {
-                        result += walk(child);
+                        result += walk(child, inPre);
                     }
                 }
                 return '\n' + result;
             }
 
-            if (tag === 'TD' || tag === 'TH') return walkChildren(node).trim() + '\t';
-            if (tag === 'TR') return walkChildren(node).replace(/\t$/, '') + '\n';
+            if (tag === 'TD' || tag === 'TH') return walkChildren(node, inPre).trim() + '\t';
+            if (tag === 'TR') return walkChildren(node, inPre).replace(/\t$/, '') + '\n';
 
-            const inner = walkChildren(node);
-            if (BLOCK.has(tag)) return '\n' + inner.trim() + '\n';
+            const inner = walkChildren(node, inPre);
+            if (BLOCK.has(tag)) {
+                // 预格式化块只去掉首尾空行，保留首行缩进与行内空白；普通块照旧 trim。
+                const bodyText = inPre ? inner.replace(/^\n+/, '').replace(/\n+$/, '') : inner.trim();
+                return '\n' + bodyText + '\n';
+            }
             return inner;
         }
 
-        return walk(element).replace(/\n{3,}/g, '\n\n').trim();
+        return walk(element, false).replace(/\n{3,}/g, '\n\n').trim();
     }
 
     function openOverlay() {
@@ -1267,8 +1286,8 @@
     const UPDATE_CHECK_INTERVAL = 6 * 60 * 60 * 1000; // 自动检查间隔：6 小时
 
     function currentVersion() {
-        try { return (GM_info && GM_info.script && GM_info.script.version) || '0.18'; }
-        catch (e) { return '0.18'; }
+        try { return (GM_info && GM_info.script && GM_info.script.version) || '0.19'; }
+        catch (e) { return '0.19'; }
     }
 
     function parseVersion(v) {
