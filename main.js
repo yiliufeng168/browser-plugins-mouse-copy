@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mouse Move Text Extractor with Highlight, Selectable Text, Clipboard Copy, and Centered Notification
 // @namespace    http://tampermonkey.net/
-// @version      0.17
+// @version      0.18
 // @description  Extract text content from elements on mouse hover. Trigger: Cmd+Shift+P (macOS) or Ctrl+Shift+P (Windows/Linux). Features: highlight, selectable text, clipboard copy, DeepSeek translation, encode/decode panel, and centered popup notification
 // @author       You
 // @match        *://*/*
@@ -9,8 +9,14 @@
 // @grant        GM_setValue
 // @grant        GM_getValue
 // @grant        GM_xmlhttpRequest
+// @grant        GM_registerMenuCommand
 // @connect      api.deepseek.com
+// @connect      raw.githubusercontent.com
 // @require      https://cdn.jsdelivr.net/npm/turndown@7.2.0/dist/turndown.js
+// @homepageURL  https://github.com/yiliufeng168/browser-plugins-mouse-copy
+// @supportURL   https://github.com/yiliufeng168/browser-plugins-mouse-copy/issues
+// @updateURL    https://raw.githubusercontent.com/yiliufeng168/browser-plugins-mouse-copy/main/main.js
+// @downloadURL  https://raw.githubusercontent.com/yiliufeng168/browser-plugins-mouse-copy/main/main.js
 // ==/UserScript==
 
 (function() {
@@ -324,6 +330,56 @@
             white-space: pre-wrap;
             line-height: 1.6;
         }
+        /* --- Update banner --- */
+        #mouse-copy-update-banner {
+            position: fixed;
+            top: 16px;
+            left: 50%;
+            transform: translateX(-50%);
+            display: none;
+            align-items: center;
+            gap: 12px;
+            background: linear-gradient(135deg, #1e3a8a, #6d28d9);
+            color: #fff;
+            padding: 11px 16px;
+            border-radius: 9px;
+            box-shadow: 0 6px 24px rgba(0,0,0,0.45);
+            z-index: 2147483647;
+            font-size: 14px;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            max-width: 92vw;
+        }
+        #mouse-copy-update-banner .ucb-text { line-height: 1.4; }
+        #mouse-copy-update-banner .ucb-text b { color: #ffd200; }
+        #mouse-copy-update-banner button {
+            border: none;
+            border-radius: 5px;
+            padding: 5px 12px;
+            font-size: 13px;
+            cursor: pointer;
+            user-select: none;
+            transition: opacity 0.15s, transform 0.1s;
+            white-space: nowrap;
+        }
+        #mouse-copy-update-banner button:hover { opacity: 0.85; }
+        #mouse-copy-update-banner button:active { transform: scale(0.95); }
+        #mouse-copy-update-banner .ucb-update {
+            background: linear-gradient(135deg, #f7971e, #ffd200);
+            color: #111;
+            font-weight: 600;
+        }
+        #mouse-copy-update-banner .ucb-ignore {
+            background: rgba(255,255,255,0.16);
+            color: #fff;
+        }
+        #mouse-copy-update-banner .ucb-close {
+            background: transparent;
+            color: rgba(255,255,255,0.75);
+            padding: 4px 6px;
+            font-size: 16px;
+            line-height: 1;
+        }
+        #mouse-copy-update-banner .ucb-close:hover { color: #fff; }
     `);
 
     // --- DOM structure ---
@@ -1197,4 +1253,128 @@
         event.stopPropagation();
         translateText(textContent.innerText.trim());
     });
+
+    // --- Auto-update ---
+    // Tampermonkey already updates this script in the background via the @updateURL /
+    // @downloadURL headers above. This module adds an in-page notifier: it polls the
+    // raw script on GitHub, compares @version, and surfaces a banner when a newer
+    // release is out — so the user knows immediately instead of waiting for the next
+    // silent background check.
+    const UPDATE_RAW_URL = 'https://raw.githubusercontent.com/yiliufeng168/browser-plugins-mouse-copy/main/main.js';
+    const UPDATE_REPO_URL = 'https://github.com/yiliufeng168/browser-plugins-mouse-copy';
+    const UPDATE_CHECK_INTERVAL = 6 * 60 * 60 * 1000; // 自动检查间隔：6 小时
+
+    function currentVersion() {
+        try { return (GM_info && GM_info.script && GM_info.script.version) || '0.18'; }
+        catch (e) { return '0.18'; }
+    }
+
+    function parseVersion(v) {
+        return String(v || '0').trim().split(/[.\-]/).map(n => parseInt(n, 10) || 0);
+    }
+
+    // 返回 1: a>b, -1: a<b, 0: 相等
+    function compareVersions(a, b) {
+        const pa = parseVersion(a), pb = parseVersion(b);
+        const len = Math.max(pa.length, pb.length);
+        for (let i = 0; i < len; i++) {
+            const da = pa[i] || 0, db = pb[i] || 0;
+            if (da > db) return 1;
+            if (da < db) return -1;
+        }
+        return 0;
+    }
+
+    function extractRemoteVersion(scriptText) {
+        const m = scriptText.match(/^\s*\/\/\s*@version\s+(.+?)\s*$/m);
+        return m ? m[1].trim() : null;
+    }
+
+    let updateBanner = null;
+    function showUpdateBanner(remoteVersion) {
+        if (updateBanner) updateBanner.remove();
+        const local = currentVersion();
+
+        updateBanner = document.createElement('div');
+        updateBanner.id = 'mouse-copy-update-banner';
+
+        const text = document.createElement('span');
+        text.className = 'ucb-text';
+        text.innerHTML = `🚀 Mouse Copy 有新版本 <b>v${remoteVersion}</b>（当前 v${local}）`;
+
+        const updateBtn = document.createElement('button');
+        updateBtn.className = 'ucb-update';
+        updateBtn.textContent = '立即更新';
+        updateBtn.addEventListener('click', () => {
+            // 打开 .user.js 安装入口（Tampermonkey 会拦截并弹出更新确认）；
+            // 同时也提供原始脚本链接作为兜底。
+            window.open(UPDATE_RAW_URL, '_blank');
+            updateBanner.remove();
+        });
+
+        const ignoreBtn = document.createElement('button');
+        ignoreBtn.className = 'ucb-ignore';
+        ignoreBtn.textContent = '忽略此版本';
+        ignoreBtn.addEventListener('click', () => {
+            GM_setValue('update_ignored_version', remoteVersion);
+            updateBanner.remove();
+        });
+
+        const closeBtnEl = document.createElement('button');
+        closeBtnEl.className = 'ucb-close';
+        closeBtnEl.textContent = '✕';
+        closeBtnEl.title = '稍后提醒';
+        closeBtnEl.addEventListener('click', () => updateBanner.remove());
+
+        updateBanner.appendChild(text);
+        updateBanner.appendChild(updateBtn);
+        updateBanner.appendChild(ignoreBtn);
+        updateBanner.appendChild(closeBtnEl);
+        document.body.appendChild(updateBanner);
+        updateBanner.style.display = 'flex';
+    }
+
+    async function checkForUpdate(manual) {
+        if (!manual) {
+            const last = await GM_getValue('update_last_check', 0);
+            if (Date.now() - last < UPDATE_CHECK_INTERVAL) return;
+        }
+        GM_setValue('update_last_check', Date.now());
+
+        GM_xmlhttpRequest({
+            method: 'GET',
+            url: UPDATE_RAW_URL + '?t=' + Date.now(), // 绕过 CDN 缓存
+            onload: async (res) => {
+                if (res.status < 200 || res.status >= 300) {
+                    if (manual) alert('检查更新失败：HTTP ' + res.status);
+                    return;
+                }
+                const remote = extractRemoteVersion(res.responseText);
+                if (!remote) {
+                    if (manual) alert('检查更新失败：未能解析远程版本号');
+                    return;
+                }
+                const local = currentVersion();
+                if (compareVersions(remote, local) > 0) {
+                    if (!manual) {
+                        const ignored = await GM_getValue('update_ignored_version', '');
+                        if (ignored && compareVersions(remote, ignored) <= 0) return;
+                    }
+                    showUpdateBanner(remote);
+                } else if (manual) {
+                    alert(`已是最新版本 v${local}`);
+                }
+            },
+            onerror: () => { if (manual) alert('检查更新失败：网络请求错误'); },
+            ontimeout: () => { if (manual) alert('检查更新失败：请求超时'); },
+            timeout: 15000,
+        });
+    }
+
+    if (typeof GM_registerMenuCommand === 'function') {
+        GM_registerMenuCommand('检查更新', () => checkForUpdate(true));
+    }
+
+    // 启动后延迟检查，避免影响页面加载
+    setTimeout(() => checkForUpdate(false), 5000);
 })();
