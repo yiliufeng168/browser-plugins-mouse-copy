@@ -84,7 +84,21 @@ API Key 申请地址：[platform.deepseek.com](https://platform.deepseek.com/)
 - **页面提示**：脚本每 6 小时拉取一次 `main.meta.js` 的版本号，发现更高版本时在页面顶部弹出横幅，支持「立即更新 / 忽略此版本」
 - **手动检查**：点击 Tampermonkey 图标 → 本脚本菜单 → **检查更新**
 
-> ⚠️ **发布新版本时，必须同时提升 `main.js` 与 `main.meta.js` 头部的 `@version`**（两者元数据块需保持一致），再推送到仓库 `main` 分支，已安装的脚本才能检测到更新。
+> 发布新版本时**只需修改 `main.js` 头部的 `@version`**——`main.meta.js` 会由 git `pre-commit` 钩子自动同步生成，无需手工编辑，然后推送到仓库 `main` 分支即可。
+
+### 维护者：main.meta.js 自动同步
+
+`main.meta.js` 由 `main.js` 的元数据块自动生成，提交时通过 git 钩子保持一致：
+
+- 钩子脚本：`.githooks/pre-commit` → 调用 `scripts/gen-meta.sh`
+- 每次 `git commit` 会自动重新生成 `main.meta.js` 并加入本次提交
+- 手动生成：`sh scripts/gen-meta.sh`
+
+> 钩子已随仓库版本化，但 `core.hooksPath` 是本地 git 配置、不会随克隆带过来。**克隆仓库后需执行一次**：
+>
+> ```sh
+> git config core.hooksPath .githooks
+> ```
 
 ## 版本历史
 

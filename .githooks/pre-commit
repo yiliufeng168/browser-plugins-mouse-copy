@@ -1,0 +1,6 @@
+#!/bin/sh
+# 提交前自动从 main.js 重新生成 main.meta.js 并纳入本次提交，
+# 保证两文件的元数据块（尤其 @version）永远一致。
+ROOT="$(git rev-parse --show-toplevel)"
+sh "$ROOT/scripts/gen-meta.sh"
+git add "$ROOT/main.meta.js"

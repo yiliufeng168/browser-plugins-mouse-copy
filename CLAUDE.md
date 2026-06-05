@@ -12,7 +12,9 @@ Single-file Tampermonkey userscript that enables text extraction, encoding/hashi
 
 Tampermonkey native update via header directives: `@updateURL` → `main.meta.js` (metadata-only, cheap version poll), `@downloadURL` → `main.js` (full script). An in-script notifier (end of the IIFE) polls `main.meta.js` every 6h, compares `@version` numerically, and shows a top banner + registers a "检查更新" menu command.
 
-**When bumping the version, change `@version` in BOTH `main.js` and `main.meta.js`** — the two metadata blocks must stay identical, or update detection breaks.
+`main.meta.js` is generated, not hand-edited: edit only `main.js`'s header. A `pre-commit` hook (`.githooks/pre-commit` → `scripts/gen-meta.sh`) extracts the `==UserScript==` block from `main.js` into `main.meta.js` and stages it on every commit, so the two blocks (esp. `@version`) can never drift. Run `sh scripts/gen-meta.sh` to regenerate manually.
+
+The hook lives in the repo but `core.hooksPath` is local git config, **not** cloned — after a fresh clone run once: `git config core.hooksPath .githooks`.
 
 ## Installation / Deployment
 
