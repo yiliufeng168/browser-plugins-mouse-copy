@@ -1,13 +1,14 @@
 // ==UserScript==
 // @name         Mouse Move Text Extractor with Highlight, Selectable Text, Clipboard Copy, and Centered Notification
 // @namespace    http://tampermonkey.net/
-// @version      0.21
-// @description  Extract text content from elements on mouse hover. Trigger: Cmd+Shift+P (macOS) or Ctrl+Shift+P (Windows/Linux). Features: highlight, selectable text, clipboard copy, DeepSeek translation, encode/decode panel
+// @version      0.30.0
+// @description  Mouse Copy：按住 Cmd/Ctrl+Shift 移动取文，松开固定；Esc 退出。可编辑原文、翻译、编解码、Markdown、恢复草稿。
 // @author       You
 // @match        *://*/*
-// @grant        GM_addStyle
+// @run-at       document-idle
 // @grant        GM_setValue
 // @grant        GM_getValue
+// @grant        GM_setClipboard
 // @grant        GM_xmlhttpRequest
 // @grant        GM_registerMenuCommand
 // @connect      api.deepseek.com
@@ -15,792 +16,432 @@
 // @require      https://cdn.jsdelivr.net/npm/turndown@7.2.0/dist/turndown.js
 // @homepageURL  https://github.com/yiliufeng168/browser-plugins-mouse-copy
 // @supportURL   https://github.com/yiliufeng168/browser-plugins-mouse-copy/issues
-// @updateURL    https://raw.githubusercontent.com/yiliufeng168/browser-plugins-mouse-copy/main/main.meta.js
-// @downloadURL  https://raw.githubusercontent.com/yiliufeng168/browser-plugins-mouse-copy/main/main.user.js
+// @updateURL    none
 // ==/UserScript==
 
-(function() {
+/*
+ * v0.30.0 使用说明
+ * 1. 按住 Cmd(macOS)/Ctrl(Windows/Linux)+Shift 移动鼠标预览取文；松开任一键固定。
+ * 2. Cmd/Ctrl+Shift+P 打开/收起面板；Esc 取消取文或关闭面板；菜单也可打开。
+ * 3. “重新取文”可免按键取文，单击目标固定；↑/↓或范围按钮扩大/缩小范围。
+ * 4. 替换内容前自动保留内存草稿，可用上一步/下一步恢复；刷新网页后清空。
+ * 5. 设置中保存、测试 DeepSeek Key。自动翻译按网站开启，默认关闭。
+ * 6. 编解码在本地完成。翻译向 api.deepseek.com 发送当前文字，可能产生 API 费用。
+ * 7. 为防上游覆盖本次定制，关闭自动更新；设置中仍可手动检查上游版本。
+ * 限制：不能提取图片、canvas 中的文字；跨域 iframe 由各自脚本实例处理。
+ */
+(function () {
     'use strict';
-
-    GM_addStyle(`
-        #mouse-text-overlay {
-            position: fixed;
-            background-color: rgba(0, 0, 0, 0.82);
-            color: white;
-            padding: 24px 10px 8px 10px;
-            font-size: 16px;
-            border-radius: 5px;
-            z-index: 9999;
-            pointer-events: auto;
-            user-select: text;
-            max-width: 2200px;
-        }
-        #mouse-text-body {
-            display: flex;
-            flex-direction: row;
-            gap: 12px;
-            align-items: stretch;
-        }
-        #mouse-text-left {
-            flex: 0 0 570px;
-            min-width: 0;
-            display: flex;
-            flex-direction: column;
-        }
-        #mouse-text-content {
-            flex: 1 1 auto;
-            user-select: text;
-            word-break: break-word;
-            white-space: pre-wrap;
-            outline: none;
-            min-height: 1em;
-            max-height: 630px;
-            cursor: text;
-            overflow-y: auto;
-            transition: min-height 0.15s ease;
-        }
-        #mouse-text-content.free-input {
-            min-height: 200px;
-        }
-        #mouse-text-content:focus {
-            outline: 1px solid rgba(255,255,255,0.4);
-            border-radius: 3px;
-        }
-        #mouse-text-translation {
-            display: none;
-            flex: 0 0 540px;
-            min-width: 0;
-            flex-direction: column;
-            border-left: 1px solid rgba(255,255,255,0.2);
-            padding-left: 10px;
-            color: #d0f0ff;
-            user-select: text;
-        }
-        #mouse-text-translation-header {
-            display: flex;
-            justify-content: flex-end;
-            align-items: center;
-            margin-bottom: 4px;
-            flex-shrink: 0;
-        }
-        #mouse-text-translation-content {
-            flex: 1 1 auto;
-            overflow-y: auto;
-            max-height: 600px;
-            font-size: 15px;
-            word-break: break-word;
-            white-space: pre-wrap;
-        }
-        .cve-tag {
-            display: inline-block;
-            background: #e74c3c;
-            color: white;
-            padding: 1px 6px;
-            border-radius: 3px;
-            cursor: pointer;
-            font-size: 12px;
-            font-weight: bold;
-            user-select: none;
-            transition: background 0.15s, transform 0.1s;
-        }
-        .cve-tag:hover { background: #c0392b; }
-        .cve-tag:active { transform: scale(0.93); }
-        .cve-tag.cve-copied { background: #27ae60; }
-        #mouse-text-btn-bar {
-            display: flex;
-            gap: 6px;
-            margin-top: 8px;
-            flex-wrap: wrap;
-            align-items: center;
-            flex-shrink: 0;
-        }
-        #mouse-text-copy-btn,
-        #mouse-text-translate-btn,
-        #mouse-text-auto-btn {
-            display: inline-flex;
-            align-items: center;
-            gap: 4px;
-            padding: 5px 10px;
-            border: none;
-            border-radius: 4px;
-            font-size: 13px;
-            cursor: pointer;
-            user-select: none;
-            transition: opacity 0.15s, transform 0.1s;
-        }
-        #mouse-text-copy-btn {
-            background: linear-gradient(135deg, #4f8ef7, #7b5ea7);
-            color: white;
-        }
-        #mouse-text-translate-btn {
-            background: linear-gradient(135deg, #11998e, #38ef7d);
-            color: #111;
-        }
-        #mouse-text-auto-btn {
-            background: rgba(255,255,255,0.12);
-            color: rgba(255,255,255,0.7);
-            border: 1px solid rgba(255,255,255,0.2);
-        }
-        #mouse-text-auto-btn.active {
-            background: linear-gradient(135deg, #f7971e, #ffd200);
-            color: #111;
-            border-color: transparent;
-        }
-        #mouse-text-copy-btn:hover,
-        #mouse-text-translate-btn:hover,
-        #mouse-text-auto-btn:hover { opacity: 0.85; }
-        #mouse-text-copy-btn:active,
-        #mouse-text-translate-btn:active,
-        #mouse-text-auto-btn:active { transform: scale(0.95); }
-        #mouse-text-copy-btn.copied {
-            background: linear-gradient(135deg, #2ecc71, #27ae60);
-        }
-        #mouse-text-translate-btn:disabled {
-            opacity: 0.5;
-            cursor: default;
-        }
-        .highlighted-element { background-color: rgba(255, 255, 0, 0.5); }
-        #mouse-text-close-btn {
-            position: absolute;
-            top: 4px;
-            right: 6px;
-            background: transparent;
-            border: none;
-            color: rgba(255,255,255,0.7);
-            font-size: 16px;
-            line-height: 1;
-            cursor: pointer;
-            padding: 0 2px;
-            user-select: none;
-        }
-        #mouse-text-close-btn:hover { color: white; }
-        /* --- Codec panels --- */
-        #mouse-text-codec-encode,
-        #mouse-text-codec-hash {
-            display: none;
-            min-width: 0;
-            max-height: 630px;
-            overflow-y: auto;
-            border-left: 1px solid rgba(255,255,255,0.15);
-            padding-left: 10px;
-            user-select: text;
-        }
-        #mouse-text-codec-encode { flex: 0 0 630px; }
-        #mouse-text-codec-hash   { flex: 0 0 540px; }
-        .codec-panel-header {
-            font-size: 11px;
-            font-weight: 700;
-            color: rgba(255,255,255,0.65);
-            text-transform: uppercase;
-            letter-spacing: 0.08em;
-            margin-bottom: 7px;
-            padding-bottom: 4px;
-            border-bottom: 1px solid rgba(255,255,255,0.15);
-        }
-        .codec-divider {
-            height: 1px;
-            background: rgba(255,255,255,0.07);
-            margin: 5px 0;
-        }
-        .codec-row {
-            display: flex;
-            align-items: flex-start;
-            gap: 6px;
-            margin-bottom: 5px;
-        }
-        .codec-label {
-            flex: 0 0 auto;
-            min-width: 100px;
-            font-size: 12px;
-            color: #b8d0e8;
-            white-space: nowrap;
-            padding-top: 2px;
-        }
-        .codec-value {
-            flex: 1 1 0;
-            word-break: break-all;
-            color: #e8f4ff;
-            font-family: monospace;
-            font-size: 13px;
-            line-height: 1.5;
-            max-height: 4.5em;
-            overflow-y: auto;
-        }
-        #mouse-text-codec-hash .codec-value {
-            color: #a8f0c6;
-        }
-        .codec-value.codec-fail {
-            color: rgba(255,255,255,0.3);
-            font-style: italic;
-        }
-        .codec-value.codec-loading {
-            color: rgba(255,255,255,0.45);
-            font-style: italic;
-        }
-        .codec-copy-btn {
-            flex: 0 0 auto;
-            padding: 1px 6px;
-            border: none;
-            border-radius: 3px;
-            background: rgba(255,255,255,0.1);
-            color: rgba(255,255,255,0.6);
-            font-size: 11px;
-            cursor: pointer;
-            user-select: none;
-            transition: background 0.12s;
-            white-space: nowrap;
-            align-self: flex-start;
-        }
-        .codec-copy-btn:hover { background: rgba(255,255,255,0.22); color: white; }
-        .codec-copy-btn.copied {
-            background: rgba(46,204,113,0.3);
-            color: #4ade80;
-        }
-        #mouse-text-codec-btn {
-            display: inline-flex;
-            align-items: center;
-            gap: 4px;
-            padding: 5px 10px;
-            border: none;
-            border-radius: 4px;
-            font-size: 13px;
-            cursor: pointer;
-            user-select: none;
-            transition: opacity 0.15s, transform 0.1s;
-            background: linear-gradient(135deg, #6d28d9, #2563eb);
-            color: white;
-        }
-        #mouse-text-codec-btn:hover { opacity: 0.85; }
-        #mouse-text-codec-btn:active { transform: scale(0.95); }
-        #mouse-text-codec-btn.active { outline: 2px solid rgba(255,255,255,0.45); }
-        #mouse-text-md-btn {
-            display: inline-flex;
-            align-items: center;
-            gap: 4px;
-            padding: 5px 10px;
-            border: none;
-            border-radius: 4px;
-            font-size: 13px;
-            cursor: pointer;
-            user-select: none;
-            transition: opacity 0.15s, transform 0.1s;
-            background: linear-gradient(135deg, #0f9b58, #00b4d8);
-            color: white;
-        }
-        #mouse-text-md-btn:hover { opacity: 0.85; }
-        #mouse-text-md-btn:active { transform: scale(0.95); }
-        #mouse-text-md-btn.active { outline: 2px solid rgba(255,255,255,0.45); }
-        #mouse-text-markdown {
-            display: none;
-            flex: 0 0 570px;
-            min-width: 0;
-            flex-direction: column;
-            border-left: 1px solid rgba(255,255,255,0.2);
-            padding-left: 10px;
-            color: #c8f0d0;
-            user-select: text;
-        }
-        #mouse-text-markdown-header {
-            display: flex;
-            justify-content: flex-end;
-            align-items: center;
-            margin-bottom: 4px;
-            flex-shrink: 0;
-        }
-        #mouse-text-markdown-content {
-            flex: 1 1 auto;
-            overflow-y: auto;
-            max-height: 600px;
-            font-size: 13px;
-            font-family: monospace;
-            word-break: break-word;
-            white-space: pre-wrap;
-            line-height: 1.6;
-        }
-        /* --- Update banner --- */
-        #mouse-copy-update-banner {
-            position: fixed;
-            top: 16px;
-            left: 50%;
-            transform: translateX(-50%);
-            display: none;
-            align-items: center;
-            gap: 12px;
-            background: linear-gradient(135deg, #1e3a8a, #6d28d9);
-            color: #fff;
-            padding: 11px 16px;
-            border-radius: 9px;
-            box-shadow: 0 6px 24px rgba(0,0,0,0.45);
-            z-index: 2147483647;
-            font-size: 14px;
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-            max-width: 92vw;
-        }
-        #mouse-copy-update-banner .ucb-text { line-height: 1.4; }
-        #mouse-copy-update-banner .ucb-text b { color: #ffd200; }
-        #mouse-copy-update-banner button {
-            border: none;
-            border-radius: 5px;
-            padding: 5px 12px;
-            font-size: 13px;
-            cursor: pointer;
-            user-select: none;
-            transition: opacity 0.15s, transform 0.1s;
-            white-space: nowrap;
-        }
-        #mouse-copy-update-banner button:hover { opacity: 0.85; }
-        #mouse-copy-update-banner button:active { transform: scale(0.95); }
-        #mouse-copy-update-banner .ucb-update {
-            background: linear-gradient(135deg, #f7971e, #ffd200);
-            color: #111;
-            font-weight: 600;
-        }
-        #mouse-copy-update-banner .ucb-ignore {
-            background: rgba(255,255,255,0.16);
-            color: #fff;
-        }
-        #mouse-copy-update-banner .ucb-close {
-            background: transparent;
-            color: rgba(255,255,255,0.75);
-            padding: 4px 6px;
-            font-size: 16px;
-            line-height: 1;
-        }
-        #mouse-copy-update-banner .ucb-close:hover { color: #fff; }
-    `);
-
-    // --- DOM structure ---
-    const overlay = document.createElement('div');
-    overlay.id = 'mouse-text-overlay';
-    overlay.style.display = 'none';
-
-    const body = document.createElement('div');
-    body.id = 'mouse-text-body';
-    overlay.appendChild(body);
-
-    const leftCol = document.createElement('div');
-    leftCol.id = 'mouse-text-left';
-    body.appendChild(leftCol);
-
-    const textContent = document.createElement('div');
-    textContent.id = 'mouse-text-content';
-    textContent.contentEditable = 'true';
-    leftCol.appendChild(textContent);
-
-    const btnBar = document.createElement('div');
-    btnBar.id = 'mouse-text-btn-bar';
-    leftCol.appendChild(btnBar);
-
-    const copyBtn = document.createElement('button');
-    copyBtn.id = 'mouse-text-copy-btn';
-    copyBtn.innerHTML = '&#128203; 复制';
-    btnBar.appendChild(copyBtn);
-
-    const translateBtn = document.createElement('button');
-    translateBtn.id = 'mouse-text-translate-btn';
-    translateBtn.innerHTML = '&#127760; 翻译';
-    btnBar.appendChild(translateBtn);
-
-    const autoBtn = document.createElement('button');
-    autoBtn.id = 'mouse-text-auto-btn';
-    autoBtn.innerHTML = '⚡ 自动翻译';
-    btnBar.appendChild(autoBtn);
-
-    const codecBtn = document.createElement('button');
-    codecBtn.id = 'mouse-text-codec-btn';
-    codecBtn.innerHTML = '&#128290; 编解码';
-    btnBar.appendChild(codecBtn);
-
-    const mdBtn = document.createElement('button');
-    mdBtn.id = 'mouse-text-md-btn';
-    mdBtn.innerHTML = '&#128196; Markdown';
-    btnBar.appendChild(mdBtn);
-
-    const translationPanel = document.createElement('div');
-    translationPanel.id = 'mouse-text-translation';
-    body.appendChild(translationPanel);
-
-    const translationHeader = document.createElement('div');
-    translationHeader.id = 'mouse-text-translation-header';
-    translationPanel.appendChild(translationHeader);
-
-    const translationCopyBtn = document.createElement('button');
-    translationCopyBtn.className = 'codec-copy-btn';
-    translationCopyBtn.textContent = '复制';
-    translationHeader.appendChild(translationCopyBtn);
-
-    const translationContent = document.createElement('div');
-    translationContent.id = 'mouse-text-translation-content';
-    translationPanel.appendChild(translationContent);
-
-    // --- Encode/decode panel ---
-    const codecEncodePanel = document.createElement('div');
-    codecEncodePanel.id = 'mouse-text-codec-encode';
-    body.appendChild(codecEncodePanel);
-
-    // --- Hash panel ---
-    const codecHashPanel = document.createElement('div');
-    codecHashPanel.id = 'mouse-text-codec-hash';
-    body.appendChild(codecHashPanel);
-
-    // --- Markdown panel ---
-    const markdownPanel = document.createElement('div');
-    markdownPanel.id = 'mouse-text-markdown';
-    body.appendChild(markdownPanel);
-
-    const markdownHeader = document.createElement('div');
-    markdownHeader.id = 'mouse-text-markdown-header';
-    markdownPanel.appendChild(markdownHeader);
-
-    const markdownCopyBtn = document.createElement('button');
-    markdownCopyBtn.className = 'codec-copy-btn';
-    markdownCopyBtn.textContent = '复制';
-    markdownHeader.appendChild(markdownCopyBtn);
-
-    const markdownContent = document.createElement('div');
-    markdownContent.id = 'mouse-text-markdown-content';
-    markdownPanel.appendChild(markdownContent);
-
-    function makePanel(panel, title) {
-        const h = document.createElement('div');
-        h.className = 'codec-panel-header';
-        h.textContent = title;
-        panel.appendChild(h);
-    }
-
-    function makeDivider(panel) {
-        const d = document.createElement('div');
-        d.className = 'codec-divider';
-        panel.appendChild(d);
-    }
-
-    function makeCodecRow(panel, label) {
-        const row = document.createElement('div');
-        row.className = 'codec-row';
-        const lbl = document.createElement('span');
-        lbl.className = 'codec-label';
-        lbl.textContent = label;
-        const val = document.createElement('span');
-        val.className = 'codec-value';
-        const btn = document.createElement('button');
-        btn.className = 'codec-copy-btn';
-        btn.textContent = '复制';
-        row.appendChild(lbl);
-        row.appendChild(val);
-        row.appendChild(btn);
-        panel.appendChild(row);
-        return { valueEl: val, copyBtn: btn };
-    }
-
-    makePanel(codecEncodePanel, '编解码');
-    const codecRows = {
-        urlEncode:    makeCodecRow(codecEncodePanel, 'URL 编码'),
-        urlEncodeAll: makeCodecRow(codecEncodePanel, 'URL 全编码'),
-        urlDecode:    makeCodecRow(codecEncodePanel, 'URL 解码'),
+    const VERSION = '0.30.0';
+    const HOST_ID = 'mouse-copy-workbench-v030';
+    if (document.getElementById(HOST_ID)) return;
+    const isMac = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
+    const MOD = isMac ? 'Cmd' : 'Ctrl';
+    const SITE_KEY = 'mouse_copy_auto_v030:' + location.origin;
+    const API_URL = 'https://api.deepseek.com/chat/completions';
+    const UPSTREAM = 'https://github.com/yiliufeng168/browser-plugins-mouse-copy';
+    const MAX_CAPTURE = 200000;
+    const state = {
+        open: false, tab: 'translate', revision: 0, source: null, html: '', capturedText: '',
+        capture: null, capturePreviousRange: [], candidate: null, candidateBase: null, candidateData: null, smaller: [],
+        past: [], future: [], job: null, autoTimer: null, auto: false, key: '',
+        result: { translate: null, codec: null, markdown: null }, mdMode: 'source',
+        pos: null, drag: null, suppressChord: false, previousFocus: null
     };
-    makeDivider(codecEncodePanel);
-    Object.assign(codecRows, {
-        b64Encode: makeCodecRow(codecEncodePanel, 'B64 编码'),
-        b64Decode: makeCodecRow(codecEncodePanel, 'B64 解码'),
-    });
-    makeDivider(codecEncodePanel);
-    Object.assign(codecRows, {
-        hexEncode: makeCodecRow(codecEncodePanel, 'Hex 编码'),
-        hexDecode: makeCodecRow(codecEncodePanel, 'Hex 解码'),
-    });
-    makeDivider(codecEncodePanel);
-    Object.assign(codecRows, {
-        unicodeEscape:   makeCodecRow(codecEncodePanel, '\\uXXXX 转义'),
-        unicodeUnescape: makeCodecRow(codecEncodePanel, '\\uXXXX 还原'),
-    });
-    makeDivider(codecEncodePanel);
-    Object.assign(codecRows, {
-        hexEscapeAscii: makeCodecRow(codecEncodePanel, '\\xXX 转义'),
-        octEscapeAscii: makeCodecRow(codecEncodePanel, '\\0XX 转义'),
-    });
-
-    makePanel(codecHashPanel, '哈希');
-    Object.assign(codecRows, {
-        md5:    makeCodecRow(codecHashPanel, 'MD5'),
-        sha1:   makeCodecRow(codecHashPanel, 'SHA-1'),
-        sha256: makeCodecRow(codecHashPanel, 'SHA-256'),
-        sha384: makeCodecRow(codecHashPanel, 'SHA-384'),
-        sha512: makeCodecRow(codecHashPanel, 'SHA-512'),
-    });
-
-    const closeBtn = document.createElement('button');
-    closeBtn.id = 'mouse-text-close-btn';
-    closeBtn.textContent = '✕';
-    overlay.appendChild(closeBtn);
-
-    document.body.appendChild(overlay);
-
-    // --- Platform ---
-    const isMac = /Mac/.test(navigator.userAgent);
-    const modKey = isMac ? 'Meta' : 'Control'; // Cmd on macOS, Ctrl on Windows/Linux
-
-    // --- State ---
-    const CVE_REGEX = /CVE-\d{4}-\d{4,7}/gi;
-    const translationCache = new Map();
-    let currentHighlightedElement = null;
-    let currentElementHTML = '';
-    let userEditing = false;
-    let autoTranslate = false;
-    let autoTranslateTimer = null;
-    let currentStreamRequest = null;
-    let lastEncodedText = '';
-    let commandPressed = false;
-    let shiftPressed = false;
-    let mouseMoving = false;
-    let mouseMoveTimer = null;
-
-    const turndownService = new TurndownService({
-        headingStyle: 'atx',
-        codeBlockStyle: 'fenced',
-        bulletListMarker: '-',
-    });
-
-    // Load persisted auto-translate setting
-    (async () => {
-        autoTranslate = !!(await GM_getValue('auto_translate', false));
-        autoBtn.classList.toggle('active', autoTranslate);
-    })();
-
-    // --- Helpers ---
-    function escapeHtml(str) {
-        return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const cache = new Map();
+    const host = document.createElement('div');
+    host.id = HOST_ID;
+    // Shadow DOM keeps page CSS away from controls, and plugin CSS away from the page.
+    host.style.cssText = 'all:initial!important;position:fixed!important;inset:0!important;width:0!important;height:0!important;z-index:2147483647!important;';
+    const root = host.attachShadow({ mode: 'open' });
+    const style = document.createElement('style');
+    style.textContent = `
+        :host{color-scheme:dark} *{box-sizing:border-box} [hidden]{display:none!important}
+        .panel{position:fixed;top:16px;left:16px;width:min(960px,calc(100vw - 24px));max-width:calc(100vw - 24px);max-height:calc(100dvh - 24px);display:flex;flex-direction:column;background:#151b25;color:#e7edf7;border:1px solid #38465a;border-radius:14px;box-shadow:0 18px 70px #0006;font:14px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif;overflow:hidden;text-align:left}
+        button,input,select,textarea{font:inherit;color:inherit} button{border:1px solid #41506a;background:#202b3b;border-radius:7px;padding:6px 10px;min-height:32px;cursor:pointer;white-space:nowrap}button:hover:not(:disabled){background:#30415b}button:disabled{opacity:.45;cursor:not-allowed}button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline:2px solid #83b7ff;outline-offset:2px}
+        button.primary{background:#3374d5;border-color:#4c8bea;color:#fff}button.primary:hover:not(:disabled){background:#4184e8}.icon{min-width:36px;min-height:36px;padding:4px}.muted,.hint{color:#a5b4ca;font-size:12px}.hint{margin:6px 0;white-space:normal;overflow-wrap:anywhere}.warn{color:#f1c77c}.error{color:#ffaaa5}
+        .header{display:flex;align-items:center;gap:8px;padding:10px 14px;border-bottom:1px solid #303c50;cursor:move;touch-action:none;flex:none}.brand{font-size:15px;font-weight:700}.badge{padding:2px 7px;border-radius:12px;background:#233d38;color:#9be5c3;font-size:11px}.spacer{flex:1}.toolbar{display:flex;gap:6px;align-items:center;flex-wrap:wrap;padding:10px 14px;border-bottom:1px solid #303c50;flex:none}
+        .layout{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);min-height:0;overflow:auto}.source,.results{min-width:0;padding:14px}.source{border-right:1px solid #303c50}.labelrow{display:flex;align-items:center;gap:8px;margin-bottom:8px}.labelrow label{font-weight:600}.editor{display:block;resize:vertical;width:100%;height:260px;min-height:110px;max-height:45dvh;background:#0e141e;border:1px solid #34435b;border-radius:8px;padding:12px;line-height:1.65;tab-size:4;white-space:pre-wrap;overflow:auto;user-select:text}.source-actions{display:flex;gap:8px;align-items:center;margin-top:10px;flex-wrap:wrap}
+        .chips{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px}.chips button{font:12px ui-monospace,monospace;color:#b9d6ff;min-height:28px;padding:3px 7px}.tabs{display:flex;gap:4px;border-bottom:1px solid #34435b;margin-bottom:12px;padding-bottom:8px}.tabs button{border-color:transparent;background:transparent;padding:5px 9px}.tabs button[aria-selected=true]{color:#b9d6ff;background:#263e60;border-color:#41628d}
+        .result-actions{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:8px}.output{margin:0;min-height:100px;max-height:300px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;font:14px/1.65 system-ui,sans-serif;user-select:text}.mono{font:13px/1.65 ui-monospace,SFMono-Regular,Consolas,monospace}.stale{opacity:.55}.notice{margin:8px 0;color:#f1c77c;font-size:12px}.codec-list{max-height:330px;overflow:auto}.codec-row{padding:9px 0;border-bottom:1px solid #2c384b}.codec-head{display:flex;align-items:center;gap:8px;font-size:12px;color:#b9cbe3}.codec-value{margin:5px 0 0;max-height:110px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;font:12px/1.6 ui-monospace,monospace}.codec-group{color:#a5b4ca;margin:12px 0 0;font-size:12px}select,input[type=password],input[type=text],input[type=number]{max-width:100%;background:#0e141e;border:1px solid #41506a;border-radius:6px;padding:6px 8px}select{min-width:0;white-space:normal}.footer{padding:9px 14px;border-top:1px solid #303c50;flex:none}.status{min-height:21px;overflow-wrap:anywhere}.shortcut{font-size:11px;color:#90a3bf;margin-top:3px}
+        .settings{padding:14px;overflow:auto;min-height:0}.setting-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px}.setting-row label{display:flex;gap:7px;align-items:center}.key{flex:1;min-width:130px}.settings h3{font-size:14px;margin:0 0 10px}.settings p{margin:5px 0 12px}.settings a{color:#b9d6ff}.settings hr{border:0;border-top:1px solid #303c50;margin:16px 0}
+        .panel.capturing{width:min(420px,calc(100vw - 24px))}.panel.capturing .layout,.panel.capturing .settings,.panel.capturing .toolbar{display:none}.capture-info{padding:12px 14px;max-height:130px;overflow:auto;white-space:pre-wrap;font-size:12px}.outline{position:fixed;border:2px solid #70aaff;background:#548fff14;border-radius:3px;pointer-events:none;box-shadow:0 0 0 1px #15243b;z-index:1}.panel{z-index:2}
+        @media(max-width:680px){.layout{grid-template-columns:minmax(0,1fr)}.source{border-right:0;border-bottom:1px solid #303c50}.editor{height:150px;max-height:30dvh}.output,.codec-list{max-height:200px}.header{padding:8px 10px}.toolbar{padding:8px 10px}.source,.results{padding:10px}.header .muted{display:none}}
+        @media(prefers-reduced-motion:no-preference){button{transition:background .12s}}
+    `;
+    root.appendChild(style);
+    const shell = document.createElement('div');
+    shell.innerHTML = `
+      <div class="outline" hidden></div>
+      <section class="panel" role="dialog" aria-modal="false" aria-label="Mouse Copy 文本工作台" hidden>
+        <header class="header"><span class="brand">Mouse Copy</span><span class="muted">0.30</span><span class="badge" id="mode">已固定</span><span class="spacer"></span><button class="icon" id="settingsToggle" title="设置" aria-label="打开设置" aria-expanded="false">⚙</button><button class="icon" id="close" title="关闭（Esc）" aria-label="关闭面板">✕</button></header>
+        <div class="capture-info" hidden></div>
+        <div class="toolbar"><button id="pick">重新取文</button><button id="expand" title="扩大到上一级元素">扩大范围 ↑</button><button id="shrink" title="返回较小的元素">缩小范围 ↓</button><span class="spacer"></span><button id="back" title="恢复上一份内容，包括替换前的编辑草稿">上一步</button><button id="forward">下一步</button><button id="new">新建</button></div>
+        <div class="layout">
+          <div class="source"><div class="labelrow"><label for="editor">原文</label><span id="sourceInfo" class="muted">可直接输入或粘贴</span><span class="spacer"></span><span id="count" class="muted">0 字符</span></div>
+          <textarea id="editor" class="editor" spellcheck="false" placeholder="按住 ${MOD}+Shift 移动鼠标取文，松开固定。也可以直接粘贴文字。"></textarea>
+          <div class="source-actions"><button id="copySource" class="primary">复制原文</button><label class="hint"><input type="checkbox" id="auto"> 此网站自动翻译</label></div><div class="hint" id="autoHint"></div><div class="chips" aria-label="CVE 快速复制"></div></div>
+          <div class="results"><div class="tabs" role="tablist" aria-label="处理方式"><button id="tab-translate" role="tab" aria-controls="pane-translate" data-tab="translate">翻译</button><button id="tab-codec" role="tab" aria-controls="pane-codec" data-tab="codec">编解码</button><button id="tab-markdown" role="tab" aria-controls="pane-markdown" data-tab="markdown">Markdown</button></div>
+          <section id="pane-translate" role="tabpanel" aria-labelledby="tab-translate"><div class="result-actions"><button id="translate">翻译成中文</button><button id="stop" hidden>停止</button><button id="copyTranslation" disabled>复制译文</button></div><div class="hint">当前文字将发送至 DeepSeek，可能产生 API 费用。</div><div id="translateNotice" class="notice" role="status"></div><pre id="translation" class="output">点击“翻译成中文”开始。</pre></section>
+          <section id="pane-codec" role="tabpanel" aria-labelledby="tab-codec" hidden><div class="result-actions"><button id="codecRun">重新计算</button><select id="codecFilter" aria-label="筛选转换类型"><option value="all">全部</option><option value="encode">编码</option><option value="decode">解码</option><option value="hash">哈希</option></select></div><div class="hint">本地计算 · UTF-8；保留原文首尾空格和换行。</div><div id="codecNotice" class="notice" role="status"></div><div class="codec-list"></div></section>
+          <section id="pane-markdown" role="tabpanel" aria-labelledby="tab-markdown" hidden><div class="result-actions"><select id="mdMode" aria-label="Markdown 来源"><option value="source">网页原始格式</option><option value="edited">当前编辑文本（纯文本）</option></select><button id="mdRun">重新生成</button><button id="copyMarkdown" disabled>复制</button></div><div class="hint" id="mdHint"></div><div id="markdownNotice" class="notice" role="status"></div><pre id="markdown" class="output mono"></pre></section></div>
+        </div>
+        <section class="settings" aria-label="设置" hidden>
+          <h3>DeepSeek 翻译</h3><div class="setting-row"><label for="apiKey">API Key</label><input id="apiKey" class="key" type="password" autocomplete="off" placeholder="输入 API Key"><button id="reveal" aria-label="显示或隐藏 API Key">显示</button></div>
+          <div class="setting-row"><button id="saveKey" class="primary">保存 Key</button><button id="testKey">测试 Key</button><button id="clearKey">清除 Key</button></div><p class="hint">Key 保存在脚本管理器中。“测试”会发送一条简短请求，可能产生少量费用。不会把 Key 写入网页存储。</p>
+          <div class="setting-row"><label for="autoLimit">自动翻译字数上限</label><input id="autoLimit" type="number" min="50" max="5000" step="50" value="500"><button id="saveLimit">保存</button></div><p class="hint">自动翻译仅在本网站启用；固定取文后延迟 800ms 触发。编辑文字不会自动发送。旧版全局自动翻译开关不会迁移为全站开启。</p>
+          <hr><h3>操作说明</h3><p class="hint">按住 ${MOD}+Shift 移动预览，松开固定。${MOD}+Shift+P 打开/收起。Esc 取消取文或关闭。点击“重新取文”后可单击网页目标固定；↑/↓调整范围。拖动标题栏可移动窗口。内容仅在当前页面内保留，上一步/下一步可恢复最近 20 次替换。</p><button id="resetPosition">重置位置</button>
+          <hr><h3>版本与更新</h3><p class="hint">当前为定制版 ${VERSION}，自动更新已关闭，以免上游脚本覆盖本次优化。</p><div class="setting-row"><button id="checkUpdate">检查上游版本</button><a href="${UPSTREAM}" target="_blank" rel="noopener noreferrer">项目主页</a></div><p class="hint" id="updateInfo"></p>
+          <button id="settingsDone">完成设置</button>
+        </section>
+        <footer class="footer"><div class="status" role="status" aria-live="polite" aria-atomic="true">就绪</div><div class="shortcut">${MOD}+Shift 移动取文 · 松开固定 · Esc 退出</div></footer>
+      </section>`;
+    root.appendChild(shell);
+    (document.body || document.documentElement).appendChild(host);
+    const $ = sel => root.querySelector(sel);
+    const panel = $('.panel'), editor = $('#editor');
+    let autoLimit = 500, selectionFrame = 0, lastPoint = null, testRequest = null;
+    const listen = (id, fn) => $(id).addEventListener('click', fn);
+    function say(message, error = false) { $('.status').textContent = message; $('.status').classList.toggle('error', error); }
+    function rememberSetting(key, value) {
+        try { Promise.resolve(GM_setValue(key, value)).catch(() => say('设置保存失败，请重试。', true)); }
+        catch (_) { say('设置保存失败，请重试。', true); }
     }
-
-    function renderWithCVE(text) {
-        const escaped = escapeHtml(text);
-        return escaped.replace(CVE_REGEX, match =>
-            `<span class="cve-tag" data-cve="${match}">${match}</span>`
-        );
+    function position() {
+        const r = panel.getBoundingClientRect();
+        const x = Math.max(12, Math.min(state.pos?.x ?? 16, window.innerWidth - r.width - 12));
+        const y = Math.max(12, Math.min(state.pos?.y ?? 16, window.innerHeight - r.height - 12));
+        panel.style.left = x + 'px'; panel.style.top = y + 'px';
     }
-
-    // --- 自动翻译内容判定 ---
-    // 思路：自动翻译只为「看不懂的外文」服务。只要文本里已经有相当比例的中文，
-    // 用户基本能看懂（英文多为产品名/技术名词），就不翻译；只有中文极少、
-    // 外文占绝对主导时才翻译。日文假名 / 韩文谚文一旦出现即判定为非中文。
-    const AT_MIN_LETTERS      = 4;     // 至少 4 个字母，否则太短
-    const AT_LETTER_RATIO_MIN = 0.5;   // 字母须占非空白字符的一半以上（过滤数字/符号/代码堆）
-    const AT_MAX_SPACELESS    = 24;    // 无空白且长度超此值 → 视为 ID/哈希/URL，不翻译
-    const AT_SYMBOL_RATIO_MAX = 0.15;  // 符号占非空白字符超此值 → 视为代码/标记，不翻译
-    const AT_ALPHA_RATIO_MIN  = 0.8;   // 拉丁等外文字母须占字母 ≥80%（即中文 ≤20%）才翻译
-    const AT_KANA_RATIO_MIN   = 0.15;  // 日文假名/韩文谚文占字母达到此值即判为非中文，直接翻译
-
-    // 识别 Burp Suite / 原始 HTTP 报文：请求行 (METHOD … HTTP/x.y) 或状态行 (HTTP/x.y NNN)。
-    // 起始锚定、不依赖换行，故无论提取格式是否保留都能判定。
-    function looksLikeHttpPacket(text) {
-        const t = (text || '').trimStart();
-        if (/^(GET|POST|PUT|DELETE|HEAD|OPTIONS|PATCH|TRACE|CONNECT)\s+\S+\s+HTTP\/\d(\.\d)?\b/i.test(t)) return true;
-        if (/^HTTP\/\d(\.\d)?\s+\d{3}\b/i.test(t)) return true;
-        return false;
+    function open(focus = false) {
+        if (!state.open) state.previousFocus = document.activeElement;
+        state.open = true; panel.hidden = false; position();
+        if (focus) editor.focus({ preventScroll: true });
     }
-
-    function shouldAutoTranslate(text) {
-        const t = (text || '').trim();
-        if (t.length < AT_MIN_LETTERS) return false;
-        if (looksLikeHttpPacket(t)) return false; // Burp/HTTP 报文不自动翻译
-
-        let han = 0, kana = 0, alpha = 0, digit = 0, space = 0, symbol = 0;
-        for (const ch of t) {
-            if (/\s/.test(ch)) space++;
-            else if (/\p{Script=Han}/u.test(ch)) han++;                                   // 汉字视为中文
-            else if (/\p{Script=Hiragana}|\p{Script=Katakana}|\p{Script=Hangul}/u.test(ch)) kana++; // 日文假名 / 韩文谚文
-            else if (/\p{L}/u.test(ch)) alpha++;                                          // 拉丁/西里尔/希腊等外文字母
-            else if (/\p{N}/u.test(ch)) digit++;
-            else symbol++;
-        }
-
-        const letters  = han + kana + alpha;
-        const nonSpace = letters + digit + symbol;
-        if (nonSpace === 0) return false;
-
-        // (a) 可理解文本：字母须占主导，过滤以数字/符号为主的内容（数字表、ID）
-        if (letters < AT_MIN_LETTERS) return false;
-        if (letters / nonSpace < AT_LETTER_RATIO_MIN) return false;
-
-        // (b) 符号密度过高 → 代码/标记，非自然语言
-        if (symbol / nonSpace > AT_SYMBOL_RATIO_MAX) return false;
-
-        // (c) 长且无空白 → 标识符/哈希/URL，非自然语言
-        if (space === 0 && t.length > AT_MAX_SPACELESS) return false;
-
-        // (d) 出现足够的日文假名/韩文谚文 → 明确是非中文，直接翻译
-        if (kana / letters >= AT_KANA_RATIO_MIN) return true;
-
-        // (e) 中文已占相当比例（用户能看懂）则不翻译；仅当外文占绝对主导才翻译
-        return (alpha / letters) >= AT_ALPHA_RATIO_MIN;
+    function setSettings(visible) {
+        if (visible && state.capture) cancelCapture();
+        $('.settings').hidden = !visible; $('.layout').hidden = visible; $('.toolbar').hidden = visible;
+        $('#settingsToggle').setAttribute('aria-expanded', String(visible));
+        if (visible) { $('#apiKey').value = state.key; $('#autoLimit').value = autoLimit; $('#apiKey').focus(); }
+        else $('#settingsToggle').focus();
+        position();
     }
-
-    function extractStructuredText(element) {
-        const BLOCK = new Set([
-            'P','DIV','SECTION','ARTICLE','HEADER','FOOTER','MAIN','NAV','ASIDE',
-            'H1','H2','H3','H4','H5','H6','BLOCKQUOTE','PRE','FIGURE','FIGCAPTION',
-            'ADDRESS','DETAILS','SUMMARY','TABLE','THEAD','TBODY','TFOOT','TR','DD','DT'
-        ]);
-
-        function walkChildren(node, pre) {
-            let s = '';
-            for (const child of node.childNodes) s += walk(child, pre);
-            return s;
-        }
-
-        function walk(node, pre) {
-            if (node.nodeType === 3) { // TEXT_NODE
-                // 预格式化上下文（<pre> 等）保留原始换行/缩进；普通文本折叠空白。
-                return pre ? node.textContent : node.textContent.replace(/[\r\n\t ]+/g, ' ');
-            }
-            if (node.nodeType !== 1) return ''; // not ELEMENT_NODE
+    function close() {
+        cancelCapture(); cancelTranslation(); clearTimeout(state.autoTimer);
+        if (testRequest) { testRequest.abort(); testRequest = null; $('#testKey').disabled = false; }
+        state.open = false; panel.hidden = true;
+        if (state.previousFocus?.isConnected) state.previousFocus.focus({ preventScroll: true });
+    }
+    function snapshot() { return { text: editor.value, html: state.html, capturedText: state.capturedText, source: state.source }; }
+    function pushHistory() {
+        const current = snapshot();
+        const previous = state.past.at(-1);
+        if (!previous || previous.text !== current.text || previous.html !== current.html) state.past.push(current);
+        if (state.past.length > 20) state.past.shift();
+        state.future = [];
+    }
+    function sourceChanged(message) {
+        clearTimeout(state.autoTimer); cancelTranslation(); state.revision++;
+        refreshSource(message);
+    }
+    function refreshSource(message) {
+        $('#count').textContent = `${editor.value.length} 字符`;
+        $('#sourceInfo').textContent = state.html ? (editor.value === state.capturedText ? '已固定网页内容' : '已编辑 · 网页快照保留') : '手动输入';
+        $('#copySource').disabled = !editor.value;
+        $('#expand').disabled = !state.source?.isConnected || !parentFor(state.source);
+        $('#shrink').disabled = !state.smaller.length;
+        $('#back').disabled = !state.past.length; $('#forward').disabled = !state.future.length;
+        $('#mode').textContent = editor.value === state.capturedText && state.html ? '已固定' : '编辑中';
+        renderChips(); renderResults(); updateAutoHint(); if (message) say(message);
+    }
+    function applySnapshot(s, message) {
+        editor.value = s.text; state.html = s.html; state.capturedText = s.capturedText; state.source = s.source;
+        state.smaller = []; sourceChanged(message);
+    }
+    function restore(direction) {
+        const from = direction < 0 ? state.past : state.future, to = direction < 0 ? state.future : state.past;
+        if (!from.length) return;
+        to.push(snapshot()); applySnapshot(from.pop(), '已恢复内容；处理结果需要重新生成。');
+    }
+    function renderChips() {
+        const chips = $('.chips'); chips.replaceChildren();
+        const matches = [...new Set(editor.value.match(/\bCVE-\d{4}-\d{4,7}\b/gi) || [])];
+        matches.slice(0, 30).forEach(value => { const b = document.createElement('button'); b.textContent = value; b.title = `复制 ${value}`; b.addEventListener('click', () => copy(value)); chips.appendChild(b); });
+        if (matches.length > 30) { const more = document.createElement('span'); more.className = 'hint'; more.textContent = `还有 ${matches.length - 30} 个编号，可从原文复制。`; chips.appendChild(more); }
+    }
+    async function copy(text) {
+        try {
+            if (typeof GM_setClipboard === 'function') {
+                await new Promise((resolve, reject) => {
+                    const timer = setTimeout(() => reject(new Error('剪贴板写入超时')), 3500);
+                    try { GM_setClipboard(text, 'text', () => { clearTimeout(timer); resolve(); }); }
+                    catch (e) { clearTimeout(timer); reject(e); }
+                });
+            } else if (navigator.clipboard?.writeText) { await navigator.clipboard.writeText(text); }
+            else throw new Error('剪贴板接口不可用');
+            say('已复制到剪贴板。');
+        } catch (_) { say('复制失败，请选中文字后按 ' + MOD + '+C 手动复制。', true); }
+    }
+    function fresh(kind) { const r = state.result[kind]; return r && r.revision === state.revision && (kind !== 'markdown' || r.mode === state.mdMode); }
+    function renderResults() {
+        const t = state.result.translate, m = state.result.markdown;
+        $('#translation').textContent = t?.text || (t?.status === 'loading' ? '正在等待翻译…' : '点击“翻译成中文”开始。');
+        $('#translation').classList.toggle('stale', !!t && !fresh('translate'));
+        $('#translateNotice').textContent = t && !fresh('translate') ? '原文已修改，译文已过期。请重新翻译。' : (t?.message || '');
+        $('#copyTranslation').disabled = !fresh('translate') || t.status !== 'done' || !t.text;
+        $('#translate').disabled = !!state.job || !editor.value.trim();
+        $('#translate').textContent = state.job ? '翻译中…' : (t ? '重新翻译' : '翻译成中文');
+        $('#stop').hidden = !state.job;
+        $('#markdown').textContent = m?.text || '请选择来源并生成 Markdown。';
+        $('#markdown').classList.toggle('stale', !!m && !fresh('markdown'));
+        $('#markdownNotice').textContent = m && !fresh('markdown') ? '内容或来源已变化，请重新生成。' : (m?.message || '');
+        $('#copyMarkdown').disabled = !fresh('markdown') || m.status !== 'done' || !m.text;
+        $('#mdMode').options[0].disabled = !state.html;
+        $('#mdHint').textContent = state.mdMode === 'source' ? '转换固定取文时的网页格式；不包含编辑框里的修改。' : '当前编辑内容按纯文本保留，不会恢复网页的链接、标题等格式。';
+        renderCodec();
+    }
+    function activateTab(kind, generate = true) {
+        state.tab = kind;
+        root.querySelectorAll('[data-tab]').forEach(b => { const active = b.dataset.tab === kind; b.setAttribute('aria-selected', String(active)); b.tabIndex = active ? 0 : -1; });
+        ['translate','codec','markdown'].forEach(k => { $('#pane-' + k).hidden = k !== kind; });
+        if (generate && kind === 'codec' && !fresh(kind)) runCodec();
+        if (generate && kind === 'markdown' && !fresh(kind)) runMarkdown();
+        position();
+    }
+    // Extraction is bounded and only performed when the hovered element changes.
+    function extract(element) {
+        let budget = MAX_CAPTURE + 1, visited = 0;
+        const block = /^(P|DIV|SECTION|ARTICLE|HEADER|FOOTER|MAIN|NAV|ASIDE|H[1-6]|BLOCKQUOTE|PRE|FIGURE|FIGCAPTION|ADDRESS|DETAILS|SUMMARY|TABLE|THEAD|TBODY|TFOOT|DD|DT)$/;
+        function text(s) { const out = s.slice(0, Math.max(0, budget)); budget -= out.length; return out; }
+        function walk(node, pre = false) {
+            if (budget <= 0 || ++visited > 20000) return '';
+            if (node.nodeType === 3) return text(pre ? node.data : node.data.replace(/[\r\n\t ]+/g, ' '));
+            if (node.nodeType !== 1 || node === host) return '';
             const tag = node.tagName;
-            if (tag === 'SCRIPT' || tag === 'STYLE' || tag === 'NOSCRIPT') return '';
+            if (/^(SCRIPT|STYLE|NOSCRIPT|TEMPLATE)$/.test(tag) || node.hidden || node.getAttribute('aria-hidden') === 'true') return '';
+            if (tag === 'INPUT' && node.type === 'password') return '';
+            const css = getComputedStyle(node);
+            if (css.display === 'none' || css.visibility === 'hidden') return '';
+            if (tag === 'INPUT' || tag === 'TEXTAREA') return text(node.value || '');
+            if (tag === 'SELECT') return text([...node.selectedOptions].map(o => o.textContent).join('\n'));
             if (tag === 'BR') return '\n';
-            if (tag === 'HR') return '\n───\n';
-
-            // 进入预格式化上下文：<pre> 或内联 white-space:pre*（不查 getComputedStyle，避免悬停热路径开销）
-            const inPre = pre || tag === 'PRE' ||
-                (node.style && /^pre/.test(node.style.whiteSpace));
-
+            if (tag === 'HR') return '\n---\n';
+            const inPre = pre || /^(pre|break-spaces)/.test(css.whiteSpace);
+            const children = n => [...n.childNodes].map(c => walk(c, inPre)).join('');
             if (tag === 'UL' || tag === 'OL') {
-                let result = '', idx = 0;
-                for (const child of node.childNodes) {
-                    if (child.nodeType === 1 && child.tagName === 'LI') {
-                        idx++;
-                        const prefix = tag === 'OL' ? `${idx}. ` : '• ';
-                        const content = walkChildren(child, inPre).trim();
-                        if (content) result += prefix + content + '\n';
-                    } else {
-                        result += walk(child, inPre);
-                    }
-                }
-                return '\n' + result;
+                let idx = Number(node.getAttribute('start')) || 1;
+                return '\n' + [...node.children].map(li => {
+                    if (li.tagName !== 'LI') return walk(li, inPre);
+                    if (li.hasAttribute('value')) idx = Number(li.getAttribute('value'));
+                    return (tag === 'OL' ? `${idx++}. ` : '• ') + walk(li, inPre).trim() + '\n';
+                }).join('');
             }
-
-            if (tag === 'TD' || tag === 'TH') return walkChildren(node, inPre).trim() + '\t';
-            if (tag === 'TR') return walkChildren(node, inPre).replace(/\t$/, '') + '\n';
-
-            const inner = walkChildren(node, inPre);
-            if (BLOCK.has(tag)) {
-                // 预格式化块只去掉首尾空行，保留首行缩进与行内空白；普通块照旧 trim。
-                const bodyText = inPre ? inner.replace(/^\n+/, '').replace(/\n+$/, '') : inner.trim();
-                return '\n' + bodyText + '\n';
-            }
-            return inner;
+            const s = children(node);
+            if (tag === 'TD' || tag === 'TH') return s.trim() + '\t';
+            if (tag === 'TR') return s.replace(/\t$/, '') + '\n';
+            return block.test(tag) ? '\n' + (inPre ? s.replace(/^\n|\n$/g, '') : s.trim()) + '\n' : s;
         }
-
-        return walk(element, false).replace(/\n{3,}/g, '\n\n').trim();
+        let value = walk(element).replace(/^\n+|\n+$/g, '');
+        const truncated = value.length > MAX_CAPTURE || budget <= 0 || visited > 20000;
+        value = value.slice(0, MAX_CAPTURE);
+        // Snapshot HTML for Markdown. Remove plugin, hidden elements and secret input values.
+        let html = '';
+        if (!truncated) {
+            const clone = element.cloneNode(true);
+            function prune(original, copy) {
+                for (let i = original.childNodes.length - 1; i >= 0; i--) {
+                    const source = original.childNodes[i], child = copy.childNodes[i];
+                    if (source.nodeType !== 1 || !child) continue;
+                    const css = getComputedStyle(source);
+                    if (source === host || source.hidden || source.getAttribute('aria-hidden') === 'true' || css.display === 'none' || css.visibility === 'hidden') child.remove();
+                    else prune(source, child);
+                }
+            }
+            prune(element, clone);
+            clone.querySelectorAll('script,style,noscript,template,[hidden],[aria-hidden="true"],input[type="password"]').forEach(n => n.remove());
+            clone.querySelectorAll('input,textarea,select').forEach(n => n.remove());
+            clone.querySelectorAll('[id="' + HOST_ID + '"]').forEach(n => n.remove());
+            html = /^(INPUT|TEXTAREA|SELECT)$/.test(element.tagName) ? '' : clone.outerHTML;
+            if (html.length > 1000000) html = '';
+        }
+        return { text: value, html, source: element, capturedText: value, truncated };
     }
-
-    function openOverlay() {
-        overlay.style.display = 'block';
+    function parentFor(element) {
+        const parent = element?.parentElement;
+        return parent && !/^(BODY|HTML)$/.test(parent.tagName) && parent !== host ? parent : null;
     }
-
-    function closeOverlay() {
-        overlay.style.display = 'none';
-        translationPanel.style.display = 'none';
-        codecEncodePanel.style.display = 'none';
-        codecHashPanel.style.display = 'none';
-        markdownPanel.style.display = 'none';
-        codecBtn.classList.remove('active');
-        mdBtn.classList.remove('active');
-        textContent.classList.remove('free-input');
+    function beginCapture(method) {
+        if (state.capture) return;
+        clearTimeout(state.autoTimer); cancelTranslation();
+        state.capturePreviousRange = state.smaller.slice();
+        state.capture = method; state.candidate = null; state.candidateBase = null; state.candidateData = null;
+        state.smaller = []; open(); panel.classList.add('capturing'); $('.capture-info').hidden = false;
+        $('.capture-info').textContent = method === 'hold' ? '移动鼠标选择，松开快捷键固定。↑/↓调整范围，Esc 取消。' : '移动鼠标选择，单击网页目标固定。↑/↓调整范围，Esc 取消。';
+        $('#mode').textContent = '取文中'; say('正在预览；现有内容会保留到固定新目标时。'); position();
     }
-
-    function showTranslation(text) {
-        collapseCodecPanel();
-        collapseMarkdownPanel();
-        translationContent.textContent = text;
-        translationPanel.style.display = 'flex';
-        overlay.style.display = 'flex';
+    function drawOutline() {
+        const el = state.candidate;
+        if (!state.capture || !el?.isConnected) { $('.outline').hidden = true; return; }
+        const r = el.getBoundingClientRect();
+        const o = $('.outline'); o.hidden = false;
+        o.style.left = Math.max(0, r.left) + 'px'; o.style.top = Math.max(0, r.top) + 'px';
+        o.style.width = Math.max(0, Math.min(innerWidth, r.right) - Math.max(0, r.left)) + 'px';
+        o.style.height = Math.max(0, Math.min(innerHeight, r.bottom) - Math.max(0, r.top)) + 'px';
     }
-
-    function collapseMarkdownPanel() {
-        markdownPanel.style.display = 'none';
-        mdBtn.classList.remove('active');
-        if (overlay.style.display !== 'none') overlay.style.display = 'block';
+    function candidate(element, resetRange = true) {
+        if (!element || element === host || element.tagName === 'HTML' || element.tagName === 'BODY') return;
+        if (element === state.candidate) return;
+        state.candidate = element;
+        if (resetRange) state.smaller = [];
+        state.candidateData = extract(element); drawOutline();
+        const data = state.candidateData;
+        $('.capture-info').textContent = `${state.capture === 'hold' ? '松开快捷键固定' : '单击目标固定'} · ${element.tagName.toLowerCase()} · ${data.text.length} 字符\n${data.text.slice(0, 150) || '此处没有可提取的文字，请移动到文字区域。'}${data.truncated ? '\n内容过大，已截断；建议缩小范围。' : ''}`;
     }
-
-    function showMarkdownPanel(html) {
-        collapseTranslation();
-        collapseCodecPanel();
-        let md = '';
-        try { md = turndownService.turndown(html); } catch(e) { md = '转换失败：' + e.message; }
-        markdownContent.textContent = md;
-        markdownPanel.style.display = 'flex';
-        mdBtn.classList.add('active');
-        overlay.style.display = 'flex';
+    function deepestElement(x, y) {
+        let el = document.elementFromPoint(x, y);
+        while (el?.shadowRoot && el !== host) { const inner = el.shadowRoot.elementFromPoint?.(x, y); if (!inner || inner === el) break; el = inner; }
+        return el;
     }
-
-    function collapseTranslation() {
-        translationPanel.style.display = 'none';
-        if (overlay.style.display !== 'none') overlay.style.display = 'block';
+    function previewPoint() {
+        selectionFrame = 0;
+        if (!state.capture || !lastPoint) return;
+        const el = deepestElement(lastPoint.x, lastPoint.y);
+        if (el === host) return;
+        if (el !== state.candidateBase) { state.candidateBase = el; candidate(el); }
     }
-
-    function collapseCodecPanel() {
-        codecEncodePanel.style.display = 'none';
-        codecHashPanel.style.display = 'none';
-        codecBtn.classList.remove('active');
-        if (overlay.style.display !== 'none') overlay.style.display = 'block';
+    function endCapture() {
+        state.capture = null; state.candidate = null; state.candidateData = null;
+        panel.classList.remove('capturing'); $('.capture-info').hidden = true; $('.outline').hidden = true;
+        position();
     }
-
-    // --- Codec utility functions ---
-    function codecUrlEncode(text) {
-        return encodeURIComponent(text);
+    function cancelCapture() {
+        if (!state.capture) return;
+        endCapture(); state.smaller = state.capturePreviousRange; state.capturePreviousRange = [];
+        refreshSource('已取消取文，原有内容未改变。');
     }
-
-    function codecUrlEncodeAll(text) {
-        return Array.from(new TextEncoder().encode(text))
-            .map(b => '%' + b.toString(16).padStart(2, '0').toUpperCase())
-            .join('');
+    function commitCapture() {
+        const data = state.candidateData;
+        if (!data?.text.trim()) { cancelCapture(); return; }
+        const range = state.smaller.slice(); pushHistory(); endCapture();
+        applySnapshot(data, data.truncated ? '已固定截断的内容；建议缩小范围。' : '已固定内容，可以编辑、复制或处理。');
+        state.smaller = range; state.capturePreviousRange = []; $('#shrink').disabled = !range.length;
+        if (!state.html) { state.mdMode = 'edited'; $('#mdMode').value = 'edited'; renderResults(); }
+        scheduleAuto();
     }
-
-    function codecUrlDecode(text) {
-        try { return decodeURIComponent(text); } catch(e) { return null; }
+    function changeRange(expand) {
+        const current = state.capture ? state.candidate : state.source;
+        if (!current?.isConnected) { say('原网页元素已移除，请重新取文。', true); return; }
+        const next = expand ? parentFor(current) : state.smaller.pop();
+        if (!next) { say(expand ? '已到区块边界。' : '没有更小的范围。'); return; }
+        if (expand) state.smaller.push(current);
+        if (state.capture) { candidate(next, false); return; }
+        const data = extract(next), range = state.smaller.slice();
+        if (!data.text.trim()) { say('此范围没有可提取的文字。'); return; }
+        pushHistory(); applySnapshot(data, '已调整取文范围，上一份内容已保留。'); state.smaller = range;
+        $('#shrink').disabled = !range.length; scheduleAuto();
     }
-
-    function codecB64Encode(text) {
-        try { return btoa(unescape(encodeURIComponent(text))); } catch(e) { return null; }
+    function autoReason(text) {
+        const t = text.trim();
+        if (!t) return '等待固定网页文字。';
+        if (t.length > autoLimit) return `超过 ${autoLimit} 字符，请手动翻译。`;
+        if (!state.key) return '请先在设置中保存 DeepSeek API Key。';
+        if (/^(?:GET|POST|PUT|DELETE|HEAD|OPTIONS|PATCH|TRACE|CONNECT)\s+\S+\s+HTTP\/\d|^HTTP\/\d/i.test(t)) return 'HTTP 报文不自动翻译。';
+        const letters = [...t].filter(c => /\p{L}/u.test(c));
+        if (letters.length < 4) return '文字过短，请手动翻译。';
+        const nonSpace = [...t].filter(c => !/\s/u.test(c));
+        const symbols = nonSpace.filter(c => !/[\p{L}\p{N}]/u.test(c)).length;
+        if (letters.length / nonSpace.length < .5 || symbols / nonSpace.length > .2) return '疑似代码或符号内容，请手动翻译。';
+        const kana = letters.filter(c => /\p{Script=Hiragana}|\p{Script=Katakana}|\p{Script=Hangul}/u.test(c)).length;
+        if (kana / letters.length >= .15) return '';
+        if (!/\s/.test(t) && t.length > 24) return '疑似标识符，请手动翻译。';
+        const han = letters.filter(c => /\p{Script=Han}/u.test(c)).length;
+        if (han / letters.length > .2) return '含较多中文，暂不自动翻译。';
+        return '';
     }
-
-    function codecB64Decode(text) {
-        try { return decodeURIComponent(escape(atob(text))); } catch(e) { return null; }
+    function updateAutoHint() {
+        $('#auto').checked = state.auto;
+        $('#autoHint').textContent = state.auto ? '自动翻译：' + (autoReason(editor.value) || '固定取文后发送至 DeepSeek。') : '自动翻译已关闭；启用后仅对当前网站生效。';
     }
-
-    function codecHexEncode(text) {
-        return Array.from(new TextEncoder().encode(text))
-            .map(b => b.toString(16).padStart(2, '0'))
-            .join('');
+    function scheduleAuto() {
+        clearTimeout(state.autoTimer); updateAutoHint();
+        if (!state.auto || autoReason(editor.value)) return;
+        const revision = state.revision;
+        $('#autoHint').textContent = '自动翻译：即将发送至 DeepSeek…';
+        state.autoTimer = setTimeout(() => {
+            if (state.open && !state.capture && state.auto && revision === state.revision) translate();
+        }, 800);
     }
-
-    function codecHexDecode(text) {
+    function cancelTranslation() {
+        const job = state.job;
+        if (!job) return;
+        state.job = null;
+        if (state.result.translate?.revision === job.revision) {
+            state.result.translate.status = 'cancelled'; state.result.translate.message = '翻译已停止；可重新翻译。';
+        }
+        job.request?.abort(); renderResults();
+    }
+    function httpError(status) {
+        return ({401:'API Key 无效，请在设置中修改。',402:'账户余额不足，请检查 DeepSeek 账户。',403:'请求被拒绝，请检查 Key 权限。',429:'请求过于频繁或额度受限，请稍后重试。'})[status] || `服务返回 HTTP ${status}，请稍后重试。`;
+    }
+    function translate() {
+        clearTimeout(state.autoTimer);
+        const text = editor.value;
+        if (!text.trim()) { say('请先输入或提取文字。'); return; }
+        if (!state.key) { open(); setSettings(true); say('请先保存 DeepSeek API Key。'); return; }
+        cancelTranslation(); activateTab('translate', false);
+        const revision = state.revision;
+        if (cache.has(text)) {
+            state.result.translate = { revision, status:'done', text:cache.get(text), message:'已使用本页缓存。' }; renderResults(); return;
+        }
+        const job = { revision, request:null }; state.job = job;
+        const result = { revision, status:'loading', text:'', message:'' }; state.result.translate = result;
+        renderResults(); say('正在翻译，可随时停止。');
+        let processed = 0, buffer = '', streamError = null;
+        const active = () => state.job === job && state.revision === revision;
+        function line(raw) {
+            if (!raw.startsWith('data:')) return;
+            const payload = raw.slice(5).trim();
+            if (!payload || payload === '[DONE]') return;
+            try {
+                const data = JSON.parse(payload);
+                if (data.error) { streamError = '服务返回错误，请检查账户或稍后重试。'; return; }
+                const part = data.choices?.[0]?.delta?.content;
+                if (typeof part === 'string') result.text += part;
+            } catch (_) { streamError = '收到无法解析的响应，请重试。'; }
+        }
+        function consume(response, final = false) {
+            const raw = response.responseText || '';
+            buffer += raw.slice(processed); processed = raw.length;
+            const lines = buffer.split('\n'); buffer = lines.pop(); lines.forEach(l => line(l.replace(/\r$/, '')));
+            if (final && buffer) { line(buffer.replace(/\r$/, '')); buffer = ''; }
+            if (active()) $('#translation').textContent = result.text || '正在等待翻译…';
+        }
+        function fail(message) {
+            if (!active()) return;
+            result.status = 'error'; result.message = message; state.job = null; renderResults(); say(message, true);
+        }
         try {
-            const clean = text.replace(/\s/g, '');
-            if (!/^[0-9a-fA-F]+$/.test(clean) || clean.length % 2 !== 0) return null;
-            const bytes = new Uint8Array(clean.match(/.{2}/g).map(h => parseInt(h, 16)));
-            return new TextDecoder().decode(bytes);
-        } catch(e) { return null; }
+            job.request = GM_xmlhttpRequest({
+                method:'POST', url:API_URL, timeout:90000,
+                headers:{'Content-Type':'application/json','Authorization':'Bearer ' + state.key,'Accept':'text/event-stream','Accept-Encoding':'identity'},
+                data:JSON.stringify({model:'deepseek-chat',stream:true,messages:[{role:'system',content:'你是一个翻译助手，将用户提供的文本翻译成中文，只返回翻译结果，不要解释。'},{role:'user',content:text}]}),
+                onprogress(res) { if (active() && (!res.status || (res.status >= 200 && res.status < 300))) consume(res); },
+                onload(res) {
+                    if (!active()) return;
+                    if (res.status < 200 || res.status >= 300) { fail(httpError(res.status)); return; }
+                    consume(res, true);
+                    if (streamError || !result.text) { fail(streamError || '服务未返回译文，请重试。'); return; }
+                    result.status = 'done'; result.message = ''; state.job = null;
+                    if (text.length < 20000) { cache.set(text, result.text); if (cache.size > 30) cache.delete(cache.keys().next().value); }
+                    renderResults(); say('翻译完成。');
+                },
+                onerror() { fail('网络请求失败，请检查连接后重试。'); },
+                ontimeout() { fail('翻译超时（90 秒），请重试或缩短原文。'); },
+                onabort() { fail('翻译已停止。'); }
+            });
+        } catch (_) { fail('无法发起请求，请检查脚本管理器的联网授权。'); }
     }
 
-    function codecUnicodeEscape(text) {
-        return [...text].map(c => '\\u' + c.codePointAt(0).toString(16).padStart(4, '0')).join('');
-    }
-
-    function codecUnicodeUnescape(text) {
-        try {
-            return text.replace(/\\u([0-9a-fA-F]{4})/g, (_, h) => String.fromCharCode(parseInt(h, 16)));
-        } catch(e) { return null; }
-    }
-
-    function codecHexEscapeAscii(text) {
-        return [...text].map(c => '\\x' + c.charCodeAt(0).toString(16).padStart(2, '0')).join('');
-    }
-
-    function codecOctEscapeAscii(text) {
-        return [...text].map(c => '\\' + c.charCodeAt(0).toString(8).padStart(3, '0')).join('');
-    }
-
-    // --- MD5 (public domain, Paul Johnston) ---
     function md5(str) {
         function safeAdd(x, y) { const lsw = (x & 0xFFFF) + (y & 0xFFFF); return (((x >> 16) + (y >> 16) + (lsw >> 16)) << 16) | (lsw & 0xFFFF); }
         function bitRol(n, c) { return (n << c) | (n >>> (32 - c)); }
@@ -854,536 +495,221 @@
         return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
     }
 
-    // --- Codec panel logic ---
-    function setCodecRow(row, value) {
-        if (value === null) {
-            row.valueEl.textContent = '—';
-            row.valueEl.className = 'codec-value codec-fail';
-            row.copyBtn.style.display = 'none';
-        } else {
-            row.valueEl.textContent = value;
-            row.valueEl.className = 'codec-value';
-            row.copyBtn.style.display = '';
-            row.copyBtn.dataset.value = value;
-        }
+    function bytes(text) { return new TextEncoder().encode(text); }
+    function utf8(data) { return new TextDecoder('utf-8', { fatal:true }).decode(data); }
+    function base64Encode(text) {
+        const data = bytes(text); let binary = '';
+        for (let i = 0; i < data.length; i += 8192) binary += String.fromCharCode(...data.subarray(i, i + 8192));
+        return btoa(binary);
     }
-
-    async function showCodecPanel(text) {
-        lastEncodedText = text;
-        collapseTranslation();
-        collapseMarkdownPanel();
-        codecEncodePanel.style.display = 'block';
-        codecHashPanel.style.display = 'block';
-        overlay.style.display = 'flex';
-
-        setCodecRow(codecRows.urlEncode,       codecUrlEncode(text));
-        setCodecRow(codecRows.urlEncodeAll,    codecUrlEncodeAll(text));
-        setCodecRow(codecRows.urlDecode,       codecUrlDecode(text));
-        setCodecRow(codecRows.b64Encode,       codecB64Encode(text));
-        setCodecRow(codecRows.b64Decode,       codecB64Decode(text));
-        setCodecRow(codecRows.hexEncode,       codecHexEncode(text));
-        setCodecRow(codecRows.hexDecode,       codecHexDecode(text));
-        setCodecRow(codecRows.unicodeEscape,   codecUnicodeEscape(text));
-        setCodecRow(codecRows.unicodeUnescape, codecUnicodeUnescape(text));
-        setCodecRow(codecRows.hexEscapeAscii,  codecHexEscapeAscii(text));
-        setCodecRow(codecRows.octEscapeAscii,  codecOctEscapeAscii(text));
-
-        const hashKeys  = ['md5', 'sha1', 'sha256', 'sha384', 'sha512'];
-        const hashAlgos = ['MD5', 'SHA-1', 'SHA-256', 'SHA-384', 'SHA-512'];
-        for (const key of hashKeys) {
-            codecRows[key].valueEl.textContent = '计算中…';
-            codecRows[key].valueEl.className = 'codec-value codec-loading';
-            codecRows[key].copyBtn.style.display = 'none';
-        }
-
-        const results = await Promise.allSettled(hashAlgos.map(algo => digestHex(algo, text)));
-        results.forEach((r, i) => setCodecRow(codecRows[hashKeys[i]], r.status === 'fulfilled' ? r.value : null));
+    function base64Decode(text) {
+        let clean = text.replace(/\s/g, '').replace(/-/g, '+').replace(/_/g, '/');
+        if (!/^[A-Za-z0-9+/]*={0,2}$/.test(clean) || clean.length % 4 === 1) throw new Error('不是有效的 Base64 / Base64URL 文本');
+        return utf8(Uint8Array.from(atob(clean), c => c.charCodeAt(0)));
     }
-
-    async function getApiKey() {
-        let key = await GM_getValue('deepseek_api_key', '');
-        if (!key) {
-            key = prompt('请输入 DeepSeek API Key：');
-            if (key) await GM_setValue('deepseek_api_key', key.trim());
-        }
-        return key || '';
+    function unicodeEscape(text) {
+        // JS \uXXXX represents UTF-16 code units, so emoji must use surrogate pairs.
+        return text.split('').map(c => '\\u' + c.charCodeAt(0).toString(16).padStart(4, '0')).join('');
     }
-
-    function callDeepSeekStream(text, apiKey, onChunk) {
-        return new Promise((resolve, reject) => {
-            let processed = 0;
-            let lineBuffer = '';
-
-            function parseSSEChunk(raw) {
-                lineBuffer += raw;
-                const lines = lineBuffer.split('\n');
-                lineBuffer = lines.pop();
-                for (const line of lines) {
-                    if (!line.startsWith('data: ')) continue;
-                    const payload = line.slice(6).trim();
-                    if (payload === '[DONE]') continue;
-                    try {
-                        const chunk = JSON.parse(payload);
-                        const content = chunk.choices?.[0]?.delta?.content;
-                        if (content) onChunk(content);
-                    } catch(e) {}
-                }
+    function unicodeDecode(text) {
+        if (!/\\u(?:[0-9a-f]{4}|\{[0-9a-f]{1,6}\})/i.test(text)) throw new Error('未发现 Unicode 转义序列');
+        return text.replace(/\\u(?:\{([0-9a-f]{1,6})\}|([0-9a-f]{4}))/gi, (_, point, unit) => point ? String.fromCodePoint(parseInt(point,16)) : String.fromCharCode(parseInt(unit,16)));
+    }
+    const codecDefs = [
+        ['urlEncode','URL 编码','encode',t=>encodeURIComponent(t)],
+        ['urlEncodeAll','URL 全编码（UTF-8）','encode',t=>[...bytes(t)].map(b=>'%'+b.toString(16).padStart(2,'0').toUpperCase()).join('')],
+        ['urlDecode','URL 解码','decode',t=>{ if (!/%[0-9a-f]{2}/i.test(t)) throw new Error('未发现百分号编码；+ 不会转换为空格'); return decodeURIComponent(t); }],
+        ['b64Encode','Base64 编码','encode',base64Encode],
+        ['b64Decode','Base64 / Base64URL 解码','decode',base64Decode],
+        ['hexEncode','Hex 编码（UTF-8）','encode',t=>[...bytes(t)].map(b=>b.toString(16).padStart(2,'0')).join('')],
+        ['hexDecode','Hex 解码（UTF-8）','decode',t=>{ const s=t.replace(/\s/g,''); if (!/^(?:[0-9a-f]{2})+$/i.test(s)) throw new Error('需要偶数个十六进制字符'); return utf8(Uint8Array.from(s.match(/../g),h=>parseInt(h,16))); }],
+        ['unicodeEscape','\\uXXXX 转义（UTF-16）','encode',unicodeEscape],
+        ['unicodeUnescape','Unicode 转义还原','decode',unicodeDecode],
+        ['hexEscape','\\xXX 字节转义（UTF-8）','encode',t=>[...bytes(t)].map(b=>'\\x'+b.toString(16).padStart(2,'0')).join('')],
+        ['octEscape','八进制字节转义（UTF-8）','encode',t=>[...bytes(t)].map(b=>'\\'+b.toString(8).padStart(3,'0')).join('')],
+        ...['MD5','SHA-1','SHA-256','SHA-384','SHA-512'].map(algo=>[algo,algo,'hash',t=>digestHex(algo,t)])
+    ];
+    async function runCodec() {
+        const text = editor.value, revision = state.revision;
+        const result = { revision, rows:codecDefs.map(([id,label,group])=>({id,label,group,status:'loading',text:''})) };
+        state.result.codec = result; renderCodec();
+        await Promise.all(codecDefs.map(async ([id,label,group,fn], i) => {
+            try {
+                const value = await fn(text);
+                result.rows[i] = {id,label,group,status:value === null ? 'error' : 'done',text:value ?? '当前页面不支持此算法，请在 HTTPS 页面使用。'};
+            } catch (e) {
+                result.rows[i] = {id,label,group,status:'error',text: e instanceof TypeError ? '输入无法解码为有效 UTF-8 文本。' : (e.message || '无法转换此输入。')};
             }
-
-            currentStreamRequest = GM_xmlhttpRequest({
-                method: 'POST',
-                url: 'https://api.deepseek.com/chat/completions',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${apiKey}`,
-                    // Disable response compression so Tampermonkey can expose partial
-                    // responseText during onprogress. A gzip/br-compressed stream can only
-                    // be decompressed once fully received, which makes streaming arrive
-                    // all-at-once instead of incrementally.
-                    'Accept-Encoding': 'identity',
-                    'Accept': 'text/event-stream'
-                },
-                data: JSON.stringify({
-                    model: 'deepseek-chat',
-                    stream: true,
-                    messages: [
-                        { role: 'system', content: '你是一个翻译助手，将用户提供的文本翻译成中文，只返回翻译结果，不要解释。' },
-                        { role: 'user', content: text }
-                    ]
-                }),
-                onprogress: (res) => {
-                    const newData = res.responseText.slice(processed);
-                    processed = res.responseText.length;
-                    if (newData) parseSSEChunk(newData);
-                },
-                onload: (res) => {
-                    const remaining = res.responseText.slice(processed);
-                    if (remaining) parseSSEChunk(remaining);
-                    resolve();
-                },
-                onerror: () => reject(new Error('网络请求失败'))
-            });
-        });
+        }));
+        if (state.result.codec === result) renderCodec();
     }
-
-    async function translateText(text, { showLoading = true } = {}) {
-        if (!text) return;
-
-        if (currentStreamRequest) {
-            currentStreamRequest.abort();
-            currentStreamRequest = null;
+    function renderCodec() {
+        const r = state.result.codec, container = $('.codec-list'), filter = $('#codecFilter').value;
+        $('#codecNotice').textContent = r && !fresh('codec') ? '原文已修改，结果已过期。请重新计算。' : '';
+        container.classList.toggle('stale', !!r && !fresh('codec')); container.replaceChildren();
+        if (!r) return;
+        for (const row of r.rows) {
+            if (filter !== 'all' && row.group !== filter) continue;
+            const el = document.createElement('div'); el.className = 'codec-row'; el.dataset.codec = row.id;
+            const head = document.createElement('div'); head.className = 'codec-head';
+            const label = document.createElement('span'); label.textContent = row.label;
+            const spacer = document.createElement('span'); spacer.className = 'spacer';
+            const button = document.createElement('button'); button.textContent = '复制'; button.setAttribute('aria-label','复制 '+row.label);
+            button.disabled = row.status !== 'done' || !fresh('codec'); button.addEventListener('click',()=>copy(row.text));
+            const value = document.createElement('pre'); value.className = 'codec-value';
+            value.textContent = row.status === 'loading' ? '计算中…' : (row.text || '（空字符串）');
+            if (row.status === 'error') value.classList.add('muted');
+            head.append(label,spacer,button); el.append(head,value); container.appendChild(el);
         }
-
-        if (translationCache.has(text)) {
-            showTranslation(translationCache.get(text));
-            return;
-        }
-
-        const apiKey = await getApiKey();
-        if (!apiKey) return;
-
-        if (showLoading) {
-            translateBtn.innerHTML = '⏳ 翻译中…';
-            translateBtn.disabled = true;
-        }
-
-        collapseCodecPanel();
-        collapseMarkdownPanel();
-        translationContent.textContent = '';
-        translationPanel.style.display = 'flex';
-        overlay.style.display = 'flex';
-
-        let fullText = '';
-
+    }
+    function runMarkdown() {
+        if (!state.html && state.mdMode === 'source') { state.mdMode = 'edited'; $('#mdMode').value = 'edited'; }
+        const result = {revision:state.revision,mode:state.mdMode,status:'done',text:'',message:''};
         try {
-            await callDeepSeekStream(text, apiKey, (chunk) => {
-                fullText += chunk;
-                translationContent.textContent = fullText;
-            });
-            if (fullText) translationCache.set(text, fullText);
-        } catch(e) {
-            translationContent.textContent = '翻译失败：' + e.message;
-        } finally {
-            currentStreamRequest = null;
-            if (showLoading) {
-                translateBtn.innerHTML = '&#127760; 翻译';
-                translateBtn.disabled = false;
-            }
-        }
+            if (state.mdMode === 'source') {
+                if (typeof TurndownService !== 'function') throw new Error('Markdown 组件未加载，请检查脚本依赖并刷新网页。');
+                result.text = new TurndownService({headingStyle:'atx',codeBlockStyle:'fenced',bulletListMarker:'-'}).turndown(state.html);
+                result.message = editor.value !== state.capturedText ? '这是网页快照的转换结果，不包含当前编辑修改。' : '';
+            } else { result.text = editor.value; }
+        } catch (e) { result.status = 'error'; result.message = e.message; }
+        state.result.markdown = result; renderResults();
     }
-
-    // --- Event listeners ---
-    textContent.addEventListener('focus', () => { userEditing = true; });
-    textContent.addEventListener('blur', () => { userEditing = false; });
-
-    // On macOS, Cmd+Backspace means "delete to line start", not "delete selection".
-    // When text is already selected (e.g. via Cmd+A), intercept and delete the selection instead.
-    if (isMac) {
-        textContent.addEventListener('keydown', (event) => {
-            if (event.key === 'Backspace' && event.metaKey) {
-                const sel = window.getSelection();
-                if (sel && !sel.isCollapsed) {
-                    event.preventDefault();
-                    sel.deleteFromDocument();
-                }
-            }
-        });
+    function testKey() {
+        const key = $('#apiKey').value.trim();
+        if (!key) { say('请先输入 API Key。', true); return; }
+        if (testRequest) testRequest.abort();
+        $('#testKey').disabled = true; say('正在测试 Key…');
+        const done = (message, error = false) => { testRequest = null; $('#testKey').disabled = false; say(message, error); };
+        try {
+            testRequest = GM_xmlhttpRequest({method:'POST',url:API_URL,timeout:20000,
+                headers:{'Content-Type':'application/json','Authorization':'Bearer '+key},
+                data:JSON.stringify({model:'deepseek-chat',stream:false,max_tokens:4,messages:[{role:'user',content:'Reply OK'}]}),
+                onload(res) {
+                    if (res.status < 200 || res.status >= 300) { done(httpError(res.status),true); return; }
+                    try { const body = JSON.parse(res.responseText); if (!body.choices?.length) throw new Error(); done('Key 可用。修改后请点击“保存 Key”。'); }
+                    catch (_) { done('服务响应异常，请重试。',true); }
+                },onerror:()=>done('测试失败：网络请求失败。',true),ontimeout:()=>done('测试超时，请稍后重试。',true),onabort:()=>done('测试已取消。')});
+        } catch (_) { done('无法发起请求，请检查脚本管理器授权。',true); }
     }
-
-    autoBtn.addEventListener('click', (event) => {
-        event.stopPropagation();
-        autoTranslate = !autoTranslate;
-        autoBtn.classList.toggle('active', autoTranslate);
-        GM_setValue('auto_translate', autoTranslate);
+    function checkUpdate() {
+        $('#checkUpdate').disabled = true; $('#updateInfo').textContent = '正在检查…';
+        const done = message => { $('#checkUpdate').disabled = false; $('#updateInfo').textContent = message; };
+        try { GM_xmlhttpRequest({method:'GET',url:'https://raw.githubusercontent.com/yiliufeng168/browser-plugins-mouse-copy/main/main.meta.js',timeout:15000,
+            onload(res) {
+                if (res.status !== 200) { done('检查失败：HTTP '+res.status); return; }
+                const version = res.responseText.match(/^\s*\/\/\s*@version\s+([^\r\n]+)/m)?.[1]?.trim();
+                done(version ? `上游版本：${version}；本地定制版：${VERSION}。版本号不能代表功能包含关系，安装上游版本可能覆盖本次优化。` : '未能读取上游版本号。');
+            },onerror:()=>done('检查失败：网络错误。'),ontimeout:()=>done('检查超时，请稍后重试。')});
+        } catch (_) { done('无法检查更新，请查看项目主页。'); }
+    }
+    listen('#close', close);
+    listen('#settingsToggle', () => setSettings($('.settings').hidden));
+    listen('#settingsDone', () => setSettings(false));
+    listen('#pick', () => beginCapture('click'));
+    listen('#expand', () => changeRange(true)); listen('#shrink', () => changeRange(false));
+    listen('#back', () => restore(-1)); listen('#forward', () => restore(1));
+    listen('#new', () => { pushHistory(); applySnapshot({text:'',html:'',capturedText:'',source:null},'已新建；可用“上一步”恢复之前的草稿。'); editor.focus(); });
+    listen('#copySource', () => copy(editor.value));
+    listen('#copyTranslation', () => { if (fresh('translate')) copy(state.result.translate.text); });
+    listen('#copyMarkdown', () => { if (fresh('markdown')) copy(state.result.markdown.text); });
+    listen('#translate', translate); listen('#stop', () => { cancelTranslation(); say('翻译已停止。'); });
+    listen('#codecRun', runCodec); listen('#mdRun', runMarkdown);
+    editor.addEventListener('input', () => sourceChanged('原文已修改；已有结果需要重新生成。'));
+    $('#codecFilter').addEventListener('change', renderCodec);
+    $('#mdMode').addEventListener('change', () => { state.mdMode = $('#mdMode').value; runMarkdown(); });
+    $('#auto').addEventListener('change', () => {
+        state.auto = $('#auto').checked; rememberSetting(SITE_KEY,state.auto); clearTimeout(state.autoTimer); updateAutoHint();
+        say(state.auto ? '已为此网站开启自动翻译，下次固定取文后生效。' : '已关闭此网站的自动翻译。');
     });
-
-    codecBtn.addEventListener('click', (event) => {
-        event.stopPropagation();
-        const currentText = textContent.innerText.trim();
-        if (codecEncodePanel.style.display !== 'none') {
-            if (currentText === lastEncodedText) {
-                collapseCodecPanel();
-                codecBtn.classList.remove('active');
-            } else {
-                showCodecPanel(currentText);
-            }
-        } else {
-            codecBtn.classList.add('active');
-            showCodecPanel(currentText);
-        }
+    root.querySelectorAll('[data-tab]').forEach(b => b.addEventListener('click', () => activateTab(b.dataset.tab)));
+    $('.tabs').addEventListener('keydown', e => {
+        if (!['ArrowLeft','ArrowRight','Home','End'].includes(e.key)) return;
+        e.preventDefault(); const tabs = ['translate','codec','markdown'];
+        const i = e.key === 'Home' ? 0 : e.key === 'End' ? 2 : (tabs.indexOf(state.tab) + (e.key === 'ArrowRight' ? 1 : 2)) % 3;
+        activateTab(tabs[i]); $('#tab-'+tabs[i]).focus();
     });
-
-    function handleCodecCopy(event) {
-        event.stopPropagation();
-        const btn = event.target.closest('.codec-copy-btn');
-        if (!btn || !btn.dataset.value) return;
-        navigator.clipboard.writeText(btn.dataset.value).then(() => {
-            const orig = btn.textContent;
-            btn.textContent = '✓';
-            btn.classList.add('copied');
-            setTimeout(() => { btn.textContent = orig; btn.classList.remove('copied'); }, 1500);
-        }).catch(() => {});
-    }
-
-    codecEncodePanel.addEventListener('click', handleCodecCopy);
-    codecHashPanel.addEventListener('click', handleCodecCopy);
-
-    // Cmd+Shift+P (macOS) / Ctrl+Shift+P (Windows/Linux) → show overlay
-    // Same chord again → close overlay when visible
-    window.addEventListener('keydown', (event) => {
-        const prevCmd = commandPressed;
-        const prevShift = shiftPressed;
-        if (event.key === modKey) commandPressed = true;
-        if (event.key === 'Shift') shiftPressed = true;
-
-        // Mod+Shift+P: show overlay if hidden
-        if (event.key.toLowerCase() === 'p' && commandPressed && shiftPressed) {
-            event.preventDefault();
-            if (overlay.style.display === 'none') {
-                openOverlay();
-                if (!textContent.innerText.trim()) {
-                    textContent.classList.add('free-input');
-                }
-            }
+    listen('#saveKey', () => { cancelTranslation(); state.key = $('#apiKey').value.trim(); rememberSetting('deepseek_api_key',state.key); cache.clear(); updateAutoHint(); say(state.key ? 'API Key 已保存。' : 'API Key 已清除。'); });
+    listen('#clearKey', () => { cancelTranslation(); state.key = ''; $('#apiKey').value = ''; rememberSetting('deepseek_api_key',''); cache.clear(); updateAutoHint(); say('API Key 已清除。'); });
+    listen('#reveal', () => { const input = $('#apiKey'); input.type = input.type === 'password' ? 'text' : 'password'; $('#reveal').textContent = input.type === 'password' ? '显示' : '隐藏'; });
+    listen('#testKey', testKey);
+    listen('#saveLimit', () => { const n = Number($('#autoLimit').value); if (!Number.isFinite(n) || n < 50 || n > 5000) { say('请输入 50–5000 之间的字数上限。',true); return; } autoLimit = Math.floor(n); rememberSetting('mouse_copy_auto_limit',autoLimit); updateAutoHint(); say('自动翻译字数上限已保存。'); });
+    listen('#resetPosition', () => { state.pos = null; rememberSetting('mouse_copy_position',null); position(); say('窗口位置已重置。'); });
+    listen('#checkUpdate', checkUpdate);
+    const inPanel = e => e.composedPath().includes(host);
+    window.addEventListener('keydown', e => {
+        const mod = isMac ? e.metaKey : e.ctrlKey;
+        if (e.key === 'Escape' && state.open) {
+            e.preventDefault(); e.stopImmediatePropagation();
+            if (state.capture) cancelCapture(); else if (!$('.settings').hidden) setSettings(false); else close();
+            state.suppressChord = true; return;
+        }
+        if (e.code === 'KeyP' && mod && e.shiftKey && !e.altKey) {
+            e.preventDefault(); e.stopImmediatePropagation(); state.suppressChord = true;
+            if (!e.repeat) { if (state.open) close(); else open(true); }
             return;
         }
-
-        // Mod+Shift chord completed while overlay is visible and mouse is idle → close
-        const chordCompleted = (event.key === 'Shift' && prevCmd) || (event.key === modKey && prevShift);
-        if (chordCompleted && overlay.style.display !== 'none' && !mouseMoving) {
-            closeOverlay();
-            clearTimeout(autoTranslateTimer);
-            if (currentHighlightedElement) {
-                currentHighlightedElement.classList.remove('highlighted-element');
-                currentHighlightedElement = null;
-            }
+        if (state.capture && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
+            e.preventDefault(); e.stopImmediatePropagation(); changeRange(e.key === 'ArrowUp'); return;
         }
-    });
-
-    window.addEventListener('keyup', (event) => {
-        if (event.key === modKey) commandPressed = false;
-        if (event.key === 'Shift') shiftPressed = false;
-    });
-
-    // Hover capture: while Cmd+Shift held, always track and update regardless of overlay state
-    document.addEventListener('mousemove', (event) => {
-        mouseMoving = true;
-        clearTimeout(mouseMoveTimer);
-        mouseMoveTimer = setTimeout(() => { mouseMoving = false; }, 150);
-
-        if (!commandPressed || !shiftPressed) return;
-
-        const element = document.elementFromPoint(event.clientX, event.clientY);
-        if (!element || overlay.contains(element)) return;
-
-        // While the hotkey is held, hovering a *new* page element is an explicit
-        // "extract this" intent. Drop any stale editing lock (e.g. focus left on the
-        // panel after clicking 复制) so content refreshes instead of staying frozen.
-        // A stationary cursor (same element) keeps the lock, so in-panel edits stay safe.
-        if (userEditing && element !== currentHighlightedElement) {
-            userEditing = false;
-            textContent.blur();
+        // Other modifier combinations (e.g. selecting words) must not start picking.
+        if (mod && e.shiftKey && !['Shift','Meta','Control'].includes(e.key)) state.suppressChord = true;
+    }, true);
+    window.addEventListener('keyup', e => {
+        const mod = isMac ? e.metaKey : e.ctrlKey;
+        if (!mod || !e.shiftKey) {
+            if (state.capture === 'hold') { if (selectionFrame) { cancelAnimationFrame(selectionFrame); previewPoint(); } commitCapture(); }
+            state.suppressChord = false;
         }
-
-        if (!userEditing) {
-            const trimmed = extractStructuredText(element);
-
-            if (trimmed) {
-                currentElementHTML = element.outerHTML;
-                textContent.innerHTML = renderWithCVE(trimmed);
-                textContent.classList.remove('free-input');
-                collapseTranslation();
-                collapseCodecPanel();
-                codecBtn.classList.remove('active');
-                openOverlay();
-
-                // Content panel changed → cancel any pending auto-translate from a
-                // previous element, otherwise a stale timer would translate the old
-                // text while the panel already shows the new one (content/translation
-                // mismatch). Re-arm only if the *current* text is eligible.
-                clearTimeout(autoTranslateTimer);
-                if (autoTranslate && trimmed.length <= 500 && shouldAutoTranslate(trimmed)) {
-                    autoTranslateTimer = setTimeout(() => {
-                        translateText(trimmed);
-                    }, 800);
-                }
-            }
+    }, true);
+    document.addEventListener('pointermove', e => {
+        if (inPanel(e)) return;
+        const mod = isMac ? e.metaKey : e.ctrlKey;
+        if (!state.capture && mod && e.shiftKey && !e.altKey && !state.suppressChord) {
+            const active = document.activeElement;
+            if (active !== host && (active?.matches('input,textarea,select') || active?.isContentEditable)) return;
+            if (active === host && !$('.settings').hidden) return;
+            beginCapture('hold');
         }
-
-        if (currentHighlightedElement && currentHighlightedElement !== element) {
-            currentHighlightedElement.classList.remove('highlighted-element');
-        }
-        element.classList.add('highlighted-element');
-        currentHighlightedElement = element;
-
-        const rect = element.getBoundingClientRect();
-        const overlayWidth = overlay.offsetWidth;
-        const overlayHeight = overlay.offsetHeight;
-
-        if (rect.top < overlayHeight && rect.left < overlayWidth) {
-            overlay.style.top = 'auto';
-            overlay.style.bottom = '10px';
-            overlay.style.left = '10px';
-        } else {
-            overlay.style.top = '10px';
-            overlay.style.bottom = 'auto';
-            overlay.style.left = '10px';
-        }
+        if (!state.capture) return;
+        lastPoint = {x:e.clientX,y:e.clientY};
+        if (!selectionFrame) selectionFrame = requestAnimationFrame(previewPoint);
+    }, true);
+    // Prevent activation/navigation of the selected page element in click-pick mode.
+    document.addEventListener('pointerdown', e => { if (state.capture === 'click' && !inPanel(e) && e.button === 0) { e.preventDefault(); e.stopImmediatePropagation(); } }, true);
+    document.addEventListener('click', e => {
+        if (state.capture !== 'click' || inPanel(e)) return;
+        e.preventDefault(); e.stopImmediatePropagation();
+        if (selectionFrame) { cancelAnimationFrame(selectionFrame); previewPoint(); }
+        if (!state.candidate) candidate(deepestElement(e.clientX,e.clientY));
+        commitCapture();
+    }, true);
+    window.addEventListener('blur', () => { state.suppressChord = false; if (state.capture) cancelCapture(); });
+    document.addEventListener('visibilitychange', () => { if (document.hidden) { cancelCapture(); clearTimeout(state.autoTimer); } });
+    window.addEventListener('resize', () => { if (state.open) position(); drawOutline(); });
+    window.addEventListener('scroll', drawOutline, true);
+    $('.header').addEventListener('pointerdown', e => {
+        if (e.button !== 0 || e.target.closest('button')) return;
+        const r = panel.getBoundingClientRect(); state.drag = {dx:e.clientX-r.left,dy:e.clientY-r.top};
+        $('.header').setPointerCapture(e.pointerId); e.preventDefault();
     });
-
-    document.addEventListener('mouseout', () => {
-        if (currentHighlightedElement) {
-            currentHighlightedElement.classList.remove('highlighted-element');
-            currentHighlightedElement = null;
-        }
-    });
-
-    mdBtn.addEventListener('click', (event) => {
-        event.stopPropagation();
-        if (markdownPanel.style.display !== 'none') {
-            collapseMarkdownPanel();
-        } else {
-            const html = currentElementHTML || textContent.innerHTML;
-            if (html) showMarkdownPanel(html);
-        }
-    });
-
-    markdownCopyBtn.addEventListener('click', (event) => {
-        event.stopPropagation();
-        const text = markdownContent.textContent;
-        if (!text) return;
-        navigator.clipboard.writeText(text).then(() => {
-            const orig = markdownCopyBtn.textContent;
-            markdownCopyBtn.textContent = '✓';
-            markdownCopyBtn.classList.add('copied');
-            setTimeout(() => {
-                markdownCopyBtn.textContent = orig;
-                markdownCopyBtn.classList.remove('copied');
-            }, 1500);
-        }).catch(() => {});
-    });
-
-    translationCopyBtn.addEventListener('click', (event) => {
-        event.stopPropagation();
-        const text = translationContent.textContent;
-        if (!text) return;
-        navigator.clipboard.writeText(text).then(() => {
-            const orig = translationCopyBtn.textContent;
-            translationCopyBtn.textContent = '✓';
-            translationCopyBtn.classList.add('copied');
-            setTimeout(() => {
-                translationCopyBtn.textContent = orig;
-                translationCopyBtn.classList.remove('copied');
-            }, 1500);
-        }).catch(() => {});
-    });
-
-    closeBtn.addEventListener('click', (event) => {
-        event.stopPropagation();
-        closeOverlay();
-        clearTimeout(autoTranslateTimer);
-        if (currentHighlightedElement) {
-            currentHighlightedElement.classList.remove('highlighted-element');
-            currentHighlightedElement = null;
-        }
-    });
-
-    textContent.addEventListener('click', (event) => {
-        const tag = event.target.closest('.cve-tag');
-        if (!tag) return;
-        event.stopPropagation();
-        const cve = tag.dataset.cve;
-        navigator.clipboard.writeText(cve).then(() => {
-            tag.textContent = '✓ ' + cve;
-            tag.classList.add('cve-copied');
-            setTimeout(() => {
-                tag.textContent = cve;
-                tag.classList.remove('cve-copied');
-            }, 2000);
-        }).catch(err => console.error('Failed to copy CVE: ', err));
-    });
-
-    copyBtn.addEventListener('click', (event) => {
-        event.stopPropagation();
-        const textToCopy = textContent.innerText;
-        if (!textToCopy) return;
-        navigator.clipboard.writeText(textToCopy).then(() => {
-            copyBtn.innerHTML = '&#10003; 已复制';
-            copyBtn.classList.add('copied');
-            setTimeout(() => {
-                copyBtn.innerHTML = '&#128203; 复制';
-                copyBtn.classList.remove('copied');
-            }, 2000);
-        }).catch(err => console.error('Failed to copy text: ', err));
-    });
-
-    translateBtn.addEventListener('click', (event) => {
-        event.stopPropagation();
-        translateText(textContent.innerText.trim());
-    });
-
-    // --- Auto-update ---
-    // Tampermonkey already updates this script in the background via the @updateURL /
-    // @downloadURL headers above. This module adds an in-page notifier: it polls the
-    // raw script on GitHub, compares @version, and surfaces a banner when a newer
-    // release is out — so the user knows immediately instead of waiting for the next
-    // silent background check.
-    // 检查更新只拉取轻量的 .meta.js（仅元数据块，几百字节），确认有新版本后
-    // 才打开完整脚本进行安装——避免每次轮询都下载整个脚本。
-    const UPDATE_META_URL = 'https://raw.githubusercontent.com/yiliufeng168/browser-plugins-mouse-copy/main/main.meta.js';
-    const UPDATE_DOWNLOAD_URL = 'https://raw.githubusercontent.com/yiliufeng168/browser-plugins-mouse-copy/main/main.user.js';
-    const UPDATE_CHECK_INTERVAL = 6 * 60 * 60 * 1000; // 自动检查间隔：6 小时
-
-    function currentVersion() {
-        try { return (GM_info && GM_info.script && GM_info.script.version) || '0.21'; }
-        catch (e) { return '0.21'; }
-    }
-
-    function parseVersion(v) {
-        return String(v || '0').trim().split(/[.\-]/).map(n => parseInt(n, 10) || 0);
-    }
-
-    // 返回 1: a>b, -1: a<b, 0: 相等
-    function compareVersions(a, b) {
-        const pa = parseVersion(a), pb = parseVersion(b);
-        const len = Math.max(pa.length, pb.length);
-        for (let i = 0; i < len; i++) {
-            const da = pa[i] || 0, db = pb[i] || 0;
-            if (da > db) return 1;
-            if (da < db) return -1;
-        }
-        return 0;
-    }
-
-    function extractRemoteVersion(scriptText) {
-        const m = scriptText.match(/^\s*\/\/\s*@version\s+(.+?)\s*$/m);
-        return m ? m[1].trim() : null;
-    }
-
-    let updateBanner = null;
-    function showUpdateBanner(remoteVersion) {
-        if (updateBanner) updateBanner.remove();
-        const local = currentVersion();
-
-        updateBanner = document.createElement('div');
-        updateBanner.id = 'mouse-copy-update-banner';
-
-        const text = document.createElement('span');
-        text.className = 'ucb-text';
-        text.innerHTML = `🚀 Mouse Copy 有新版本 <b>v${remoteVersion}</b>（当前 v${local}）`;
-
-        const updateBtn = document.createElement('button');
-        updateBtn.className = 'ucb-update';
-        updateBtn.textContent = '立即更新';
-        updateBtn.addEventListener('click', () => {
-            // 打开完整脚本，触发 Tampermonkey 安装/更新流程
-            window.open(UPDATE_DOWNLOAD_URL, '_blank');
-            updateBanner.remove();
-        });
-
-        const ignoreBtn = document.createElement('button');
-        ignoreBtn.className = 'ucb-ignore';
-        ignoreBtn.textContent = '忽略此版本';
-        ignoreBtn.addEventListener('click', () => {
-            GM_setValue('update_ignored_version', remoteVersion);
-            updateBanner.remove();
-        });
-
-        const closeBtnEl = document.createElement('button');
-        closeBtnEl.className = 'ucb-close';
-        closeBtnEl.textContent = '✕';
-        closeBtnEl.title = '稍后提醒';
-        closeBtnEl.addEventListener('click', () => updateBanner.remove());
-
-        updateBanner.appendChild(text);
-        updateBanner.appendChild(updateBtn);
-        updateBanner.appendChild(ignoreBtn);
-        updateBanner.appendChild(closeBtnEl);
-        document.body.appendChild(updateBanner);
-        updateBanner.style.display = 'flex';
-    }
-
-    async function checkForUpdate(manual) {
-        if (!manual) {
-            const last = await GM_getValue('update_last_check', 0);
-            if (Date.now() - last < UPDATE_CHECK_INTERVAL) return;
-        }
-        GM_setValue('update_last_check', Date.now());
-
-        GM_xmlhttpRequest({
-            method: 'GET',
-            url: UPDATE_META_URL + '?t=' + Date.now(), // 仅拉取元数据，绕过 CDN 缓存
-            onload: async (res) => {
-                if (res.status < 200 || res.status >= 300) {
-                    if (manual) alert('检查更新失败：HTTP ' + res.status);
-                    return;
-                }
-                const remote = extractRemoteVersion(res.responseText);
-                if (!remote) {
-                    if (manual) alert('检查更新失败：未能解析远程版本号');
-                    return;
-                }
-                const local = currentVersion();
-                if (compareVersions(remote, local) > 0) {
-                    if (!manual) {
-                        const ignored = await GM_getValue('update_ignored_version', '');
-                        if (ignored && compareVersions(remote, ignored) <= 0) return;
-                    }
-                    showUpdateBanner(remote);
-                } else if (manual) {
-                    alert(`已是最新版本 v${local}`);
-                }
-            },
-            onerror: () => { if (manual) alert('检查更新失败：网络请求错误'); },
-            ontimeout: () => { if (manual) alert('检查更新失败：请求超时'); },
-            timeout: 15000,
-        });
-    }
-
+    $('.header').addEventListener('pointermove', e => { if (!state.drag) return; state.pos = {x:e.clientX-state.drag.dx,y:e.clientY-state.drag.dy}; position(); });
+    const endDrag = () => { if (!state.drag) return; state.drag = null; const r=panel.getBoundingClientRect(); state.pos={x:r.left,y:r.top}; rememberSetting('mouse_copy_position',state.pos); };
+    $('.header').addEventListener('pointerup', endDrag); $('.header').addEventListener('pointercancel', endDrag);
+    // Isolate bubbling keyboard and pointer handlers from the surrounding webpage.
+    ['keydown','keyup','click','pointerdown','pointerup'].forEach(type=>root.addEventListener(type,e=>e.stopPropagation()));
+    if (typeof ResizeObserver === 'function') new ResizeObserver(() => { if (state.open && !state.drag) position(); }).observe(panel);
+    activateTab('translate', false); sourceChanged();
     if (typeof GM_registerMenuCommand === 'function') {
-        GM_registerMenuCommand('检查更新', () => checkForUpdate(true));
+        GM_registerMenuCommand('打开 Mouse Copy',()=>open(true));
+        GM_registerMenuCommand('Mouse Copy 设置',()=>{open();setSettings(true);});
     }
-
-    // 启动后延迟检查，避免影响页面加载
-    setTimeout(() => checkForUpdate(false), 5000);
+    (async () => {
+        try {
+            const [key,auto,limit,pos] = await Promise.all([GM_getValue('deepseek_api_key',''),GM_getValue(SITE_KEY,false),GM_getValue('mouse_copy_auto_limit',500),GM_getValue('mouse_copy_position',null)]);
+            state.key = String(key || '').trim(); state.auto = !!auto;
+            autoLimit = Number.isFinite(Number(limit)) ? Math.min(5000,Math.max(50,Number(limit))) : 500;
+            if (pos && Number.isFinite(pos.x) && Number.isFinite(pos.y)) state.pos = pos;
+            updateAutoHint(); if (state.open) position();
+        } catch (_) { say('读取设置失败，可在设置中重新保存。',true); }
+    })();
 })();
